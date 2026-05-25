@@ -1,0 +1,254 @@
+datasource db {
+  provider  = "postgresql"
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum Role {
+  CLIENT
+  DEVELOPER
+  HUNTER
+  ADMIN
+}
+
+enum DealState {
+  CREATED
+  INVITED
+  PENDING_PAYMENT
+  FUNDED
+  ONBOARDING
+  IN_PROGRESS
+  MILESTONE_REVIEW
+  PARTIALLY_RELEASED
+  COMPLETED
+  DISPUTED
+  REFUNDED
+  CANCELLED
+}
+
+enum MilestoneStatus {
+  PENDING
+  SUBMITTED
+  APPROVED
+  REVISION_REQUESTED
+}
+
+enum PaymentStatus {
+  PENDING
+  HELD_IN_ESCROW
+  RELEASED
+  REFUNDED
+  FAILED
+}
+
+model User {
+  id            String    @id @default(uuid())
+  email         String    @unique
+  name          String?
+  avatarUrl     String?
+  role          Role      @default(CLIENT)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  isDeleted     Boolean   @default(false)
+
+  // Profile Relations
+  devProfile    DeveloperProfile?
+  hunterProfile HunterProfile?
+  clientProfile ClientProfile?
+
+  // Deal Relations
+  dealsAsClient    Deal[] @relation("ClientDeals")
+  dealsAsDeveloper Deal[] @relation("DeveloperDeals")
+  dealsAsHunter    Deal[] @relation("HunterDeals")
+
+  // Workspace Interactions
+  messages      Message[]
+  disputesFiled Dispute[] @relation("DisputeFiler")
+  reviewsGiven  Review[]  @relation("ReviewGiver")
+  reviewsRecd   Review[]  @relation("ReviewReceiver")
+  notifications Notification[]
+  activityLogs  ActivityLog[]
+}
+
+model DeveloperProfile {
+  id                String   @id @default(uuid())
+  userId            String   @unique
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bio               String?
+  skills            String[]
+  stack             String[]
+  portfolioLinks    String[]
+  earningsTotal     Float    @default(0.0)
+  availability      Boolean  @default(true)
+  isVerified        Boolean  @default(false)
+  ratingAvg         Float    @default(0.0)
+}
+
+model HunterProfile {
+  id                String   @id @default(uuid())
+  userId            String   @unique
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  industries        String[]
+  closedDealsCount  Int      @default(0)
+  conversionRate    Float    @default(0.0)
+  ratingAvg         Float    @default(0.0)
+}
+
+model ClientProfile {
+  id                String   @id @default(uuid())
+  userId            String   @unique
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  companyName       String?
+  industry          String?
+  isVerified        Boolean  @default(false)
+  paymentReliability Float   @default(100.0)
+}
+
+model Deal {
+  id              String    @id @default(uuid())
+  title           String
+  description     String
+  budget          Float
+  state           DealState @default(CREATED)
+  
+  // Splits (Immutable once Deal transitions from CREATED/INVITED)
+  developerSplit  Float     @default(70.0) // 70% to Developer
+  hunterSplit     Float     @default(20.0) // 20% to Hunter
+  platformSplit   Float     @default(10.0) // 10% to Platform
+
+  timelineWeeks   Int
+  inviteLink      String    @unique @default(uuid())
+
+  // Core Role Connections
+  clientId        String?
+  client          User?     @relation("ClientDeals", fields: [clientId], references: [id])
+  developerId     String?
+  developer       User?     @relation("DeveloperDeals", fields: [developerId], references: [id])
+  hunterId        String
+  hunter          User      @relation("HunterDeals", fields: [hunterId], references: [id])
+
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  isDeleted       Boolean   @default(false)
+
+  // Sub-workspace elements
+  milestones      Milestone[]
+  payments        Payment[]
+  messages        Message[]
+  files           File[]
+  disputes        Dispute[]
+  reviews         Review[]
+  activityLogs    ActivityLog[]
+  aiSummary       AiSummary?
+}
+
+model Milestone {
+  id              String          @id @default(uuid())
+  dealId          String
+  deal            Deal            @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  title           String
+  amount          Float
+  dueDate         DateTime
+  deliverables    String[]
+  status          MilestoneStatus @default(PENDING)
+  revisionCount   Int             @default(0)
+  maxRevisions    Int             @default(3)
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  files           File[]
+}
+
+model Payment {
+  id                String        @id @default(uuid())
+  dealId            String
+  deal              Deal          @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  stripeIntentId    String?       @unique
+  stripeChargeId    String?
+  amount            Float
+  status            PaymentStatus @default(PENDING)
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+}
+
+model Message {
+  id        String   @id @default(uuid())
+  dealId    String
+  deal      Deal     @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  content   String
+  createdAt DateTime @default(now())
+}
+
+model File {
+  id          String     @id @default(uuid())
+  dealId      String
+  deal        Deal       @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  milestoneId String?
+  milestone   Milestone? @relation(fields: [milestoneId], references: [id])
+  name        String
+  url         String
+  sizeBytes   Int
+  mimeType    String
+  uploadedAt  DateTime   @default(now())
+}
+
+model Dispute {
+  id            String   @id @default(uuid())
+  dealId        String
+  deal          Deal     @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  filerId       String
+  filer         User     @relation("DisputeFiler", fields: [filerId], references: [id])
+  reason        String
+  evidenceNotes String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model Review {
+  id          String   @id @default(uuid())
+  dealId      String
+  deal        Deal     @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  giverId     String
+  giver       User     @relation("ReviewGiver", fields: [giverId], references: [id])
+  receiverId  String
+  receiver    User     @relation("ReviewReceiver", fields: [receiverId], references: [id])
+  rating      Int      // 1-5 stars
+  feedback    String?
+  createdAt   DateTime @default(now())
+}
+
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String
+  message   String
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+}
+
+model ActivityLog {
+  id        String   @id @default(uuid())
+  dealId    String?
+  deal      Deal?    @relation(fields: [dealId], references: [id])
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  action    String
+  details   String?
+  timestamp DateTime @default(now())
+}
+
+model AiSummary {
+  id              String   @id @default(uuid())
+  dealId          String   @unique
+  deal            Deal     @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  transcription   String?
+  summary         String
+  deliverables    String[]
+  revisionRules   String[]
+  createdAt       DateTime @default(now())
+}
