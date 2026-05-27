@@ -3,7 +3,7 @@
 import { use, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { motion, useReducedMotion } from "framer-motion";
+import { motion } from "framer-motion";
 import {
   ArrowLeft,
   Briefcase,
@@ -18,7 +18,6 @@ import {
   Heart,
   MessageSquare,
   Sparkles,
-  Send,
   Zap,
 } from "lucide-react";
 import { Navbar } from "@/components/Navbar";
@@ -47,7 +46,6 @@ type EducationItem = {
 export default function ProfilePage({ params }: { params: Promise<{ userId: string }> }) {
   const { userId } = use(params);
   const router = useRouter();
-  const reduceMotion = useReducedMotion();
   const { setCurrentUser, currentUser } = useStore();
   const [profile, setProfile] = useState<PlatformProfile | null>(null);
   const [loading, setLoading] = useState(true);
@@ -412,7 +410,7 @@ export default function ProfilePage({ params }: { params: Promise<{ userId: stri
                   <span className="text-xs uppercase tracking-widest">Platform Escrow OS</span>
                 </div>
                 <p className="text-xs leading-6 text-slate-400">
-                  Payments are locked in escrow upon Client onboarding and released systematically based on dual sign-offs. 60% Developer split and 30% Hunter split are fully active.
+                  Payments are held in escrow upon client onboarding and released systematically based on dual sign-offs, persisted payment records, and release audit trails.
                 </p>
               </AppSurface>
             </div>

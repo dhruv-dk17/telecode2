@@ -60,7 +60,7 @@ export default function InvitePage({ params }: { params: Promise<{ token: string
       return;
     }
 
-    const acceptedDealId = "deal" in response ? response.deal.id : undefined;
+    const acceptedDealId = "deal" in response && response.deal ? response.deal.id : undefined;
     setFeedback("Invite accepted. You can continue inside the workspace now.");
     setTimeout(() => {
       router.push(acceptedDealId ? `/workspace/${acceptedDealId}` : "/dashboard");

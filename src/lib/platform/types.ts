@@ -112,6 +112,7 @@ export type PlatformDeal = {
   clientApprovedDone?: boolean;
   hunterApprovedDone?: boolean;
   upiPaymentDetails?: {
+    provider?: string;
     upiId?: string;
     transactionId?: string;
     paidAt?: string;

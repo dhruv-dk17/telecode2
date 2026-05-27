@@ -1,14 +1,20 @@
 "use server";
 
-import { clearSessionCookie, readSessionCookie, writeSessionCookie } from "@/lib/session";
+import {
+  authenticateAuthUser,
+  consumePasswordReset,
+  createAuthUser,
+  createPasswordResetRequest,
+} from "@/lib/auth-store";
 import { clearRateLimit, enforceRateLimit } from "@/lib/rate-limit";
 import {
-  authenticateUser,
-  createUser,
+  authenticateUser as authenticateMockUser,
+  createUser as createMockUser,
   isDatabaseReady,
-  requestPasswordReset,
-  resetPassword,
+  requestPasswordReset as requestMockPasswordReset,
+  resetPassword as resetMockPasswordReset,
 } from "@/lib/platform/service";
+import { createSession, getCurrentSessionUser, revokeCurrentSession } from "@/lib/session";
 import type { Role, SessionUser } from "@/lib/platform/types";
 import { normalizeEmail, validateEmail } from "@/lib/validation";
 
@@ -40,9 +46,11 @@ export async function signUpAction(
       throw new Error("Password is required.");
     }
 
-    const user = await createUser({ email: normalizedEmail, name, role, password });
+    const user = (await isDatabaseReady())
+      ? await createAuthUser({ email: normalizedEmail, name, role, password })
+      : await createMockUser({ email: normalizedEmail, name, role, password });
     clearRateLimit(`signup:${normalizedEmail}`);
-    await writeSessionCookie(user);
+    await createSession(user);
     return { success: true, user };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Signup failed.";
@@ -62,9 +70,11 @@ export async function loginAction(
       throw new Error("Password is required.");
     }
 
-    const user = await authenticateUser(normalizedEmail, password);
+    const user = (await isDatabaseReady())
+      ? await authenticateAuthUser(normalizedEmail, password)
+      : await authenticateMockUser(normalizedEmail, password);
     clearRateLimit(`login:${normalizedEmail}`);
-    await writeSessionCookie(user);
+    await createSession(user);
     return { success: true, user };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Login failed.";
@@ -76,19 +86,21 @@ export async function signInWithGoogleAction() {
   return {
     success: false,
     error:
-      "Google OAuth is scaffolded in the platform plan, but this local repo is currently running in signed-session mode only.",
+      "Google OAuth is scaffolded in the platform plan, but this repo is not yet wired to a live provider configuration.",
   };
 }
 
 export async function getCurrentUserAction(): Promise<UserSession | null> {
-  return readSessionCookie();
+  return getCurrentSessionUser();
 }
 
 export async function requestPasswordResetAction(email: string): Promise<PasswordResetRequestResult> {
   try {
     const normalizedEmail = validateEmail(email);
     enforceRateLimit(`password-reset-request:${normalizedEmail}`, { maxAttempts: 3, blockMs: 30 * 60 * 1000 });
-    const result = await requestPasswordReset(normalizedEmail);
+    const result = (await isDatabaseReady())
+      ? await createPasswordResetRequest(normalizedEmail)
+      : await requestMockPasswordReset(normalizedEmail);
     return {
       success: true,
       message: "If an account exists for this email, a reset link has been issued.",
@@ -109,7 +121,11 @@ export async function resetPasswordAction(
   try {
     const normalizedEmail = validateEmail(email);
     enforceRateLimit(`password-reset-consume:${normalizedEmail}`, { maxAttempts: 5, blockMs: 30 * 60 * 1000 });
-    await resetPassword({ email: normalizedEmail, token, newPassword });
+    if (await isDatabaseReady()) {
+      await consumePasswordReset({ email: normalizedEmail, token, newPassword });
+    } else {
+      await resetMockPasswordReset({ email: normalizedEmail, token, newPassword });
+    }
     clearRateLimit(`password-reset-consume:${normalizedEmail}`);
     return { success: true, message: "Password updated. You can sign in now." };
   } catch (error) {
@@ -119,6 +135,6 @@ export async function resetPasswordAction(
 }
 
 export async function logoutAction() {
-  await clearSessionCookie();
+  await revokeCurrentSession();
   return { success: true };
 }

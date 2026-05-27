@@ -16,15 +16,9 @@ import {
   WalletCards,
   User,
   Star,
-  CheckCircle,
-  Briefcase,
   ExternalLink,
-  MessageSquare,
-  Settings,
   ThumbsUp,
   ThumbsDown,
-  XCircle,
-  Mail,
   Zap,
 } from "lucide-react";
 import { Navbar } from "@/components/Navbar";
@@ -52,7 +46,6 @@ export default function DashboardPage() {
   const reduceMotion = useReducedMotion();
   const { currentUser, setCurrentUser } = useStore();
   const [deals, setDeals] = useState<PlatformDeal[]>([]);
-  const [profile, setProfile] = useState<PlatformProfile | null>(null);
   const [developers, setDevelopers] = useState<PlatformProfile[]>([]);
   const [activeTab, setActiveTab] = useState<TabKey>("deals");
   const [loading, setLoading] = useState(true);
@@ -106,7 +99,6 @@ export default function DashboardPage() {
 
       setCurrentUser(session);
       setDeals(dealData);
-      setProfile(profileData);
       setDevelopers(devList);
       
       setProfileForm({
@@ -167,8 +159,6 @@ export default function DashboardPage() {
       return;
     }
 
-    const nextProfile = await getProfileDetailsAction();
-    setProfile(nextProfile);
     setActiveTab("deals");
   }
 
@@ -239,7 +229,7 @@ export default function DashboardPage() {
                 {currentUser?.name}, welcome to your marketplace pipeline dashboard.
               </h1>
               <p className="mt-4 max-w-2xl text-sm leading-7 text-slate-300">
-                Operating a true trust-centered marketplace. Sourcing elite coders, locking UPI escrow funding, and ensuring seamless sign-off payouts.
+                Operating a trust-centered marketplace. Sourcing elite coders, locking verified escrow funding, and ensuring clean sign-off payouts with stronger audit visibility.
               </p>
 
               <div className="mt-8 flex flex-wrap gap-3">

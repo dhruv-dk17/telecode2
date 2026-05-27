@@ -58,6 +58,9 @@ export async function acceptInviteAction(token: string) {
   try {
     const user = requireUser(await getCurrentUserAction());
     const result = await acceptInviteByToken(user, token);
+    if (!result.deal) {
+      return { success: false, error: "Deal not found." };
+    }
     revalidatePath("/dashboard");
     revalidatePath("/inbox");
     revalidatePath(`/workspace/${result.deal.id}`);

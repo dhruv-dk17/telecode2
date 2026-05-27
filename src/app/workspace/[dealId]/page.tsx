@@ -1,30 +1,24 @@
 "use client";
 
-import { use, useEffect, useMemo, useRef, useState } from "react";
+import { use, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { motion, useReducedMotion } from "framer-motion";
+import { useReducedMotion } from "framer-motion";
 import {
   ArrowLeft,
   Bot,
-  Check,
   CircleDollarSign,
-  Layers3,
   Send,
   ShieldCheck,
   QrCode,
-  Sparkles,
   Smartphone,
   CheckCircle,
   Clock,
-  User,
   Users,
-  Award,
   Wallet,
 } from "lucide-react";
 import { Navbar } from "@/components/Navbar";
 import { AppSurface } from "@/components/ui/AppSurface";
-import { TiltCard } from "@/components/ui/TiltCard";
 import { getCurrentUserAction } from "@/app/actions/auth";
 import {
   getDealsAction,
@@ -35,7 +29,7 @@ import {
 import { getMessagesAction, sendMessageAction } from "@/app/actions/chat";
 import { createInviteAction } from "@/app/actions/invitations";
 import { useStore } from "@/store/useStore";
-import type { DealState, PlatformDeal, PlatformMessage } from "@/lib/platform/types";
+import type { PlatformDeal, PlatformMessage } from "@/lib/platform/types";
 
 export default function WorkspacePage({ params }: { params: Promise<{ dealId: string }> }) {
   const { dealId } = use(params);
@@ -51,7 +45,7 @@ export default function WorkspacePage({ params }: { params: Promise<{ dealId: st
   const [tab, setTab] = useState<"chat" | "brief" | "payments">("chat");
   const endRef = useRef<HTMLDivElement | null>(null);
   
-  // Client Onboarding & UPI payment forms
+  // Client onboarding and deposit verification form
   const [clientRequirements, setClientRequirements] = useState("");
   const [clientUpiId, setClientUpiId] = useState("");
   const [payingEscrow, setPayingEscrow] = useState(false);
@@ -144,7 +138,7 @@ export default function WorkspacePage({ params }: { params: Promise<{ dealId: st
     }
   }
 
-  // Client UPI escow payment
+  // Client escrow funding submission
   async function handleUpiPaymentSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!clientRequirements.trim() || !clientUpiId.trim() || !deal) return;
@@ -156,7 +150,7 @@ export default function WorkspacePage({ params }: { params: Promise<{ dealId: st
     setPayingEscrow(false);
 
     if (response.success) {
-      setPaymentFeedback("UPI Escrow deposit funded successfully! Workspace is active.");
+      setPaymentFeedback("Escrow deposit recorded successfully. Workspace is active.");
       await refresh();
     } else {
       setPaymentFeedback(response.error || "Failed to complete payment.");
@@ -286,12 +280,12 @@ export default function WorkspacePage({ params }: { params: Promise<{ dealId: st
                     </span>
                   </div>
                   <div className="flex justify-between">
-                    <span>Simulated Gateway</span>
-                    <span className="text-cyan-300 font-bold">UPI Checkout Active</span>
+                    <span>Escrow verification</span>
+                    <span className="text-cyan-300 font-bold">Deposit reference active</span>
                   </div>
                   {deal.upiPaymentDetails?.upiId && (
                     <div className="flex justify-between border-t border-white/5 pt-2 mt-2">
-                      <span>Paid From UPI</span>
+                      <span>Deposit reference</span>
                       <span className="text-white font-mono">{deal.upiPaymentDetails.upiId}</span>
                     </div>
                   )}
@@ -304,7 +298,7 @@ export default function WorkspacePage({ params }: { params: Promise<{ dealId: st
                   <div className="font-semibold text-white">Trust escrow safeguards</div>
                 </div>
                 <p className="text-xs leading-6 text-slate-400 mt-2">
-                   escrow split payouts are governed by dual Client + Hunter completion checks. Coder receives exactly 60% upon dual sign-offs.
+                  Escrow releases are governed by dual Client + Hunter completion checks, persisted payment records, and workspace activity logs.
                 </p>
               </AppSurface>
             </div>
@@ -375,12 +369,12 @@ export default function WorkspacePage({ params }: { params: Promise<{ dealId: st
                 </AppSurface>
               )}
 
-              {/* PENDING_PAYMENT state: Client inputs requirements & pays via UPI */}
+              {/* PENDING_PAYMENT state: client submits requirements and funds escrow */}
               {deal.state === "PENDING_PAYMENT" && (
                 <AppSurface accent="violet" className="rounded-[2rem] p-6">
                   <h3 className="text-lg font-bold text-white flex items-center gap-2">
                     <Bot className="h-5 w-5 text-violet-300" />
-                    <span>Client Onboarding and UPI Funding Gate</span>
+                    <span>Client Onboarding and Escrow Funding Gate</span>
                   </h3>
 
                   {currentUser?.role === "CLIENT" ? (
@@ -398,17 +392,17 @@ export default function WorkspacePage({ params }: { params: Promise<{ dealId: st
 
                       <div className="grid md:grid-cols-2 gap-4 items-center border-t border-white/10 pt-5">
                         
-                        {/* Simulated UPI QR Code visual */}
+                        {/* Payment reference visual */}
                         <div className="upi-gate rounded-2xl p-4 text-center border border-white/5 relative overflow-hidden">
                           <div className="upi-scanner-line" />
                           <QrCode className="h-28 w-28 text-white mx-auto my-2" />
-                          <div className="text-[0.62rem] uppercase tracking-wider text-slate-400">Scan QR via GPay / PhonePe / Paytm</div>
+                          <div className="text-[0.62rem] uppercase tracking-wider text-slate-400">Secure deposit reference capture</div>
                         </div>
 
-                        {/* UPI ID input */}
+                        {/* Payment handle input */}
                         <div className="space-y-4">
                           <div>
-                            <label className="block text-xs uppercase tracking-[0.24em] text-slate-400 mb-2">Enter UPI ID</label>
+                            <label className="block text-xs uppercase tracking-[0.24em] text-slate-400 mb-2">Enter payment handle</label>
                             <input
                               type="text"
                               value={clientUpiId}
@@ -424,7 +418,7 @@ export default function WorkspacePage({ params }: { params: Promise<{ dealId: st
                             disabled={payingEscrow || !clientRequirements.trim() || !clientUpiId.trim()}
                             className="action-button action-button--primary w-full py-2.5 text-xs font-semibold"
                           >
-                            {payingEscrow ? "Verifying Deposit..." : "Authorize Escrow Deposit via UPI"}
+                            {payingEscrow ? "Verifying Deposit..." : "Authorize Escrow Deposit"}
                           </button>
                         </div>
                       </div>
@@ -437,7 +431,7 @@ export default function WorkspacePage({ params }: { params: Promise<{ dealId: st
                     <div className="mt-5 text-center py-6 border border-dashed border-white/10 rounded-2xl">
                       <Smartphone className="h-8 w-8 text-slate-500 mx-auto mb-2" />
                       <p className="text-xs text-slate-400 max-w-sm mx-auto leading-6">
-                        Waiting for Client (Robert Kim) to join the workspace, outline their website requirements, and fund the escrow via UPI.
+                        Waiting for Client (Robert Kim) to join the workspace, outline their website requirements, and fund the escrow.
                       </p>
                     </div>
                   )}
@@ -546,7 +540,7 @@ export default function WorkspacePage({ params }: { params: Promise<{ dealId: st
                   
                   <div className="mt-5 rounded-2xl bg-cyan-400/5 border border-cyan-400/10 p-5 text-xs text-slate-300 max-w-lg mx-auto text-left space-y-3">
                     <div className="flex justify-between font-semibold border-b border-cyan-400/10 pb-2 mb-2 text-cyan-300">
-                      <span>UPI Escrow released</span>
+                      <span>Escrow released</span>
                       <span>Total: ${deal.budget.toLocaleString()}</span>
                     </div>
                     <div className="flex justify-between">
@@ -607,7 +601,7 @@ export default function WorkspacePage({ params }: { params: Promise<{ dealId: st
                   {/* Messages box list */}
                   <div className="flex-1 overflow-y-auto space-y-3 pr-1 my-3 scrollbar">
                     {messages.length > 0 ? (
-                      messages.map((entry, idx) => (
+                      messages.map((entry) => (
                         <div
                           key={entry.id}
                           className={`rounded-2xl border p-3 text-xs leading-6 ${chatBubbleRoleClass(entry.user?.role)}`}
@@ -672,7 +666,7 @@ export default function WorkspacePage({ params }: { params: Promise<{ dealId: st
                     <div className="bg-black/20 rounded-xl p-3.5 border border-white/5">
                       <div className="font-bold text-white uppercase tracking-wider text-[0.65rem] mb-1.5">Escrow Milestones</div>
                       <div className="space-y-2 mt-2">
-                        {deal.milestones.map((m, idx) => (
+                        {deal.milestones.map((m) => (
                           <div key={m.id} className="flex justify-between items-center text-[0.7rem] border-b border-white/5 pb-1.5 last:border-b-0 last:pb-0">
                             <span className="text-slate-300 truncate max-w-44">{m.title}</span>
                             <span className="font-bold text-white shrink-0">${m.amount.toLocaleString()}</span>

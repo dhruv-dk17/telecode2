@@ -78,6 +78,13 @@ enum DisputeStatus {
   CLOSED
 }
 
+enum InviteStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  EXPIRED
+}
+
 enum FileCategory {
   DELIVERABLE
   CONTRACT
@@ -105,12 +112,17 @@ model User {
   hunterProfile  HunterProfile?
   clientProfile  ClientProfile?
   sessions       Session[]
+  passwordResetTokens PasswordResetToken[]
   posts          Post[]
 
   dealsAsClient    Deal[] @relation("ClientDeals")
   dealsAsDeveloper Deal[] @relation("DeveloperDeals")
   dealsAsHunter    Deal[] @relation("HunterDeals")
   dealParticipants DealParticipant[]
+  sentInvites      DealInvite[]    @relation("SentInvites")
+  receivedInvites  DealInvite[]    @relation("ReceivedInvites")
+  directMessagesReceived DirectMessage[] @relation("DirectMessagesReceived")
+  directMessagesSent     DirectMessage[] @relation("DirectMessagesSent")
 
   messages        Message[]
   disputesFiled   Dispute[] @relation("DisputeFiler")
@@ -119,6 +131,7 @@ model User {
   notifications   Notification[]
   activityLogs    ActivityLog[]
   callMemberships CallParticipant[]
+  payoutRulesReceived PayoutRule[]
 
   @@index([role, createdAt])
   @@index([isDeleted])
@@ -224,6 +237,13 @@ model Deal {
   splitLockedAt     DateTime?
   timelineWeeks     Int
   inviteLink        String    @unique @default(uuid())
+  developerAcceptanceMessage String?
+  clientRequirements String?
+  developerMarkedDone Boolean @default(false)
+  clientApprovedDone Boolean @default(false)
+  hunterApprovedDone Boolean @default(false)
+  paymentProvider   String?
+  paymentReference  String?
   escrowDepositDueAt DateTime?
   fundedAt          DateTime?
   completedAt       DateTime?
@@ -241,6 +261,7 @@ model Deal {
   isDeleted         Boolean   @default(false)
 
   participants      DealParticipant[]
+  invites           DealInvite[]
   milestones        Milestone[]
   payments          Payment[]
   payoutRules       PayoutRule[]
@@ -317,6 +338,47 @@ model Payment {
   updatedAt            DateTime      @updatedAt
 
   @@index([dealId, status, createdAt])
+}
+
+model DealInvite {
+  id             String       @id @default(uuid())
+  dealId         String
+  deal           Deal         @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  token          String       @unique
+  recipientEmail String
+  recipientRole  Role
+  invitedByUserId String
+  invitedByUser  User         @relation("SentInvites", fields: [invitedByUserId], references: [id], onDelete: Cascade)
+  invitedUserId  String?
+  invitedUser    User?        @relation("ReceivedInvites", fields: [invitedUserId], references: [id], onDelete: SetNull)
+  status         InviteStatus @default(PENDING)
+  explanation    String?
+  acceptedAt     DateTime?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  directMessages DirectMessage[]
+
+  @@index([dealId, status])
+  @@index([recipientEmail, status])
+  @@index([invitedUserId, status])
+}
+
+model DirectMessage {
+  id             String      @id @default(uuid())
+  toUserId       String
+  toUser         User        @relation("DirectMessagesReceived", fields: [toUserId], references: [id], onDelete: Cascade)
+  fromUserId     String
+  fromUser       User        @relation("DirectMessagesSent", fields: [fromUserId], references: [id], onDelete: Cascade)
+  title          String
+  body           String
+  ctaUrl         String?
+  relatedInviteId String?
+  relatedInvite  DealInvite? @relation(fields: [relatedInviteId], references: [id], onDelete: SetNull)
+  readAt         DateTime?
+  createdAt      DateTime    @default(now())
+
+  @@index([toUserId, readAt, createdAt])
 }
 
 model PayoutRule {
