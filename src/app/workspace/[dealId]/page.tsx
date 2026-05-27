@@ -1,489 +1,726 @@
 "use client";
 
-import { use, useState, useRef, useEffect } from "react";
+import { use, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { useStore, Deal, Milestone, Message } from "@/store/useStore";
-import { Navbar } from "@/components/Navbar";
+import { useRouter } from "next/navigation";
+import { motion, useReducedMotion } from "framer-motion";
 import {
-  MessageSquare,
-  DollarSign,
-  FileText,
-  Activity,
-  Bot,
-  Video,
-  Upload,
-  Send,
-  Check,
-  RefreshCw,
-  Plus,
-  AlertTriangle,
   ArrowLeft,
-  Settings,
+  Bot,
+  Check,
+  CircleDollarSign,
+  Layers3,
+  Send,
+  ShieldCheck,
+  QrCode,
+  Sparkles,
+  Smartphone,
+  CheckCircle,
+  Clock,
+  User,
+  Users,
+  Award,
+  Wallet,
 } from "lucide-react";
+import { Navbar } from "@/components/Navbar";
+import { AppSurface } from "@/components/ui/AppSurface";
+import { TiltCard } from "@/components/ui/TiltCard";
+import { getCurrentUserAction } from "@/app/actions/auth";
+import {
+  getDealsAction,
+  submitUpiPaymentAction,
+  markFinalDoneAction,
+  signOffAction,
+  updateDealStateAction,
+} from "@/app/actions/deals";
+import { createInviteForDeal } from "@/lib/platform/service"; // Direct client invite action
+import { getMessagesAction, sendMessageAction } from "@/app/actions/chat";
+import { useStore } from "@/store/useStore";
+import type { DealState, PlatformDeal, PlatformMessage } from "@/lib/platform/types";
 
-export default function Workspace({ params }: { params: Promise<{ dealId: string }> }) {
+export default function WorkspacePage({ params }: { params: Promise<{ dealId: string }> }) {
   const { dealId } = use(params);
-  const {
-    currentUser,
-    deals,
-    updateDealState,
-    submitMilestone,
-    approveMilestone,
-    requestRevision,
-    addMessage,
-    saveAiSummary,
-  } = useStore();
+  const router = useRouter();
+  const reduceMotion = useReducedMotion();
+  const { setCurrentUser, currentUser } = useStore();
+  
+  // State
+  const [deal, setDeal] = useState<PlatformDeal | null>(null);
+  const [messages, setMessages] = useState<PlatformMessage[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [message, setMessage] = useState("");
+  const [tab, setTab] = useState<"chat" | "brief" | "payments">("chat");
+  const endRef = useRef<HTMLDivElement | null>(null);
+  
+  // Client Onboarding & UPI payment forms
+  const [clientRequirements, setClientRequirements] = useState("");
+  const [clientUpiId, setClientUpiId] = useState("");
+  const [payingEscrow, setPayingEscrow] = useState(false);
+  const [paymentFeedback, setPaymentFeedback] = useState("");
 
-  const deal = deals.find((d) => d.id === dealId);
-  const [activeTab, setActiveTab] = useState<"chat" | "milestones" | "files" | "ai">("chat");
+  // Hunter invite form
+  const [clientEmail, setClientEmail] = useState("");
+  const [sendingInvite, setSendingInvite] = useState(false);
+  const [inviteFeedback, setInviteFeedback] = useState("");
 
-  // Chat state
-  const [messageText, setMessageText] = useState("");
-  const chatEndRef = useRef<HTMLDivElement>(null);
-
-  // File upload state
-  const [uploadedFiles, setUploadedFiles] = useState<{ name: string; size: string; date: string }[]>([
-    { name: "Brand-Architecture-IronPulse.pdf", size: "2.4 MB", date: "2026-05-24" },
-    { name: "Hero-Threejs-Proof.mov", size: "18.5 MB", date: "2026-05-25" },
-  ]);
-  const [newFileName, setNewFileName] = useState("");
-
-  // AI requirements generation state
-  const [isGeneratingAi, setIsGeneratingAi] = useState(false);
+  // Final delivery sign-off response state
+  const [submittingSignOff, setSubmittingSignOff] = useState(false);
 
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [deal?.messages, activeTab]);
+    let cancelled = false;
 
-  if (!deal) {
+    async function load() {
+      const session = await getCurrentUserAction();
+      if (!session) {
+        setCurrentUser(null);
+        router.push("/");
+        return;
+      }
+
+      const [deals, nextMessages] = await Promise.all([getDealsAction(), getMessagesAction(dealId)]);
+      const match = deals.find((item) => item.id === dealId) || null;
+
+      if (cancelled) return;
+
+      setCurrentUser(session);
+      setDeal(match);
+      setMessages(nextMessages);
+      setLoading(false);
+    }
+
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, [dealId, router, setCurrentUser]);
+
+  useEffect(() => {
+    endRef.current?.scrollIntoView({ behavior: reduceMotion ? "auto" : "smooth" });
+  }, [messages, reduceMotion, tab]);
+
+  async function refresh() {
+    const [deals, nextMessages] = await Promise.all([getDealsAction(), getMessagesAction(dealId)]);
+    setDeal(deals.find((item) => item.id === dealId) || null);
+    setMessages(nextMessages);
+  }
+
+  async function handleSendMessage(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!message.trim()) return;
+
+    const response = await sendMessageAction(dealId, message);
+    if (response.success) {
+      setMessage("");
+      await refresh();
+    }
+  }
+
+  // Hunter manual client invite submission (simulates instant client joined)
+  async function handleInviteClient(e: React.FormEvent) {
+    e.preventDefault();
+    if (!clientEmail.trim() || !currentUser || !deal) return;
+
+    setSendingInvite(true);
+    setInviteFeedback("");
+
+    try {
+      // Simulate client accept & join for mock-based workspace flow
+      const response = await updateDealStateAction(dealId, "PENDING_PAYMENT");
+      if (response.success) {
+        setInviteFeedback("Client invited! Escrow state transitioned to PENDING_PAYMENT.");
+        setClientEmail("");
+        await refresh();
+      } else {
+        setInviteFeedback(response.error || "Failed to invite client.");
+      }
+    } catch (err) {
+      setInviteFeedback("Failed to invite client.");
+    } finally {
+      setSendingInvite(false);
+    }
+  }
+
+  // Client UPI escow payment
+  async function handleUpiPaymentSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!clientRequirements.trim() || !clientUpiId.trim() || !deal) return;
+
+    setPayingEscrow(true);
+    setPaymentFeedback("");
+
+    const response = await submitUpiPaymentAction(dealId, clientRequirements, clientUpiId);
+    setPayingEscrow(false);
+
+    if (response.success) {
+      setPaymentFeedback("UPI Escrow deposit funded successfully! Workspace is active.");
+      await refresh();
+    } else {
+      setPaymentFeedback(response.error || "Failed to complete payment.");
+    }
+  }
+
+  // Developer submits final project work
+  async function handleMarkDone() {
+    if (!deal) return;
+    const response = await markFinalDoneAction(dealId);
+    if (response.success) {
+      await refresh();
+    }
+  }
+
+  // Client or Hunter sign-off delivery
+  async function handleSignOff() {
+    if (!deal) return;
+    setSubmittingSignOff(true);
+    const response = await signOffAction(dealId);
+    setSubmittingSignOff(false);
+    if (response.success) {
+      await refresh();
+    }
+  }
+
+  if (loading) {
     return (
-      <div className="flex min-h-screen bg-[#030303] text-foreground items-center justify-center">
-        <div className="text-center">
-          <h1 className="font-display text-2xl font-bold text-white mb-4">Workspace Not Found</h1>
-          <Link href="/dashboard" className="text-primary hover:underline">
-            Back to Dashboard
-          </Link>
+      <div className="min-h-screen">
+        <div className="noise-overlay" />
+        <div className="app-grid flex min-h-screen items-center justify-center">
+          <div className="rounded-full border border-white/10 bg-white/5 px-5 py-3 text-sm text-slate-300">
+            Loading workspace...
+          </div>
         </div>
       </div>
     );
   }
 
-  const handleSendMessage = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!messageText.trim() || !currentUser) return;
-
-    addMessage(deal.id, {
-      userId: currentUser.id,
-      userName: `${currentUser.name} (${currentUser.role})`,
-      userAvatar: currentUser.avatarUrl || "",
-      content: messageText,
-    });
-
-    setMessageText("");
-  };
-
-  const handleUploadFile = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newFileName.trim()) return;
-
-    setUploadedFiles([
-      ...uploadedFiles,
-      {
-        name: newFileName,
-        size: `${(Math.random() * 10 + 1).toFixed(1)} MB`,
-        date: new Date().toISOString().split("T")[0],
-      },
-    ]);
-    setNewFileName("");
-
-    addMessage(deal.id, {
-      userId: "system",
-      userName: "Nexus OS",
-      userAvatar: "",
-      content: `System: File '${newFileName}' uploaded by ${currentUser?.name}.`,
-    });
-  };
-
-  const handleAiGeneration = () => {
-    setIsGeneratingAi(true);
-    setTimeout(() => {
-      saveAiSummary(deal.id, {
-        summary: "IronPulse Athletics seeks an ultra-premium WebGL interactive system containing custom HSL-tailored colors, smooth Framer Motion transitions, and fully automated Stripe escrow splits.",
-        deliverables: [
-          "Interactive WebGL canvas landing page hero section",
-          "Express API endpoint handling high-frequency webhook syncs",
-          "Automated ledger split calculations with immutable revenue safeguards",
-        ],
-        revisionRules: [
-          "Maximum of 3 major asset design modifications are authorized",
-          "Any layout alteration must retain exact 70/20/10 split metrics",
-        ],
-      });
-      setIsGeneratingAi(false);
-
-      addMessage(deal.id, {
-        userId: "system",
-        userName: "Nexus AI Analyst",
-        userAvatar: "",
-        content: "AI Partnership Brief generated. Exact scope, milestones, and deliverables lock-in achieved.",
-      });
-    }, 2000);
-  };
-
-  return (
-    <div className="flex flex-col min-h-screen bg-[#030303] text-foreground">
-      <Navbar />
-
-      {/* Sub-Header / Workspace Title */}
-      <div className="border-b border-border bg-[#09090b]/40 backdrop-blur-md px-6 py-4">
-        <div className="mx-auto max-w-7xl flex flex-wrap items-center justify-between gap-4">
-          <div className="flex items-center space-x-3">
-            <Link
-              href="/dashboard"
-              className="rounded-full bg-zinc-900 border border-border p-2 text-muted-foreground hover:text-white transition-colors"
-            >
-              <ArrowLeft className="h-4 w-4" />
+  if (!deal) {
+    return (
+      <div className="min-h-screen">
+        <div className="noise-overlay" />
+        <div className="app-grid min-h-screen">
+          <Navbar />
+          <div className="relative z-[1] flex min-h-[70vh] flex-col items-center justify-center gap-4 px-4 text-center">
+            <div className="text-3xl font-semibold text-white">Workspace not found</div>
+            <Link href="/dashboard" className="action-button action-button--primary">
+              Back to dashboard
             </Link>
-            <div>
-              <div className="flex items-center space-x-2">
-                <h1 className="font-display text-xl font-bold text-white">{deal.title}</h1>
-                <span className="rounded-full bg-blue-500/10 border border-blue-500/20 text-blue-400 px-2.5 py-0.5 text-[10px] font-bold uppercase">
-                  {deal.state}
-                </span>
-              </div>
-              <p className="text-xs text-muted-foreground font-light mt-1">
-                Workspace deal ID: {deal.id} • Split: {deal.developerSplit}/{deal.hunterSplit}/10
-              </p>
-            </div>
-          </div>
-
-          {/* Quick status changes (Escrow transitions) */}
-          <div className="flex items-center space-x-2">
-            {deal.state === "PENDING_PAYMENT" && currentUser?.role === "CLIENT" && (
-              <button
-                onClick={() => updateDealState(deal.id, "FUNDED")}
-                className="rounded-full bg-emerald-500 text-white font-semibold text-xs px-4 py-2 hover:bg-emerald-600 shadow-md shadow-emerald-500/20"
-              >
-                Deposit Escrow Funds
-              </button>
-            )}
-
-            {deal.state === "FUNDED" && (
-              <button
-                onClick={() => updateDealState(deal.id, "IN_PROGRESS")}
-                className="rounded-full bg-primary text-white font-semibold text-xs px-4 py-2 hover:bg-blue-600"
-              >
-                Unlock Work Scope
-              </button>
-            )}
-
-            <div className="rounded-full bg-zinc-900 border border-border p-2 text-muted-foreground">
-              <Settings className="h-4 w-4" />
-            </div>
           </div>
         </div>
       </div>
+    );
+  }
 
-      {/* Main Workspace Workspace Layout */}
-      <main className="mx-auto max-w-7xl w-full px-6 py-8 flex-1 grid grid-cols-1 lg:grid-cols-4 gap-8">
-        {/* Navigation Sidebar */}
-        <div className="lg:col-span-1 space-y-3">
-          <button
-            onClick={() => setActiveTab("chat")}
-            className={`w-full flex items-center space-x-3 rounded-2xl p-4 text-sm font-semibold transition-all ${
-              activeTab === "chat"
-                ? "bg-primary text-white"
-                : "glass-panel text-muted-foreground hover:text-white"
-            }`}
-          >
-            <MessageSquare className="h-5 w-5" />
-            <span>Slack-grade Chat</span>
-          </button>
+  // Map role styling helper for group chat bubbles
+  const chatBubbleRoleClass = (role?: string) => {
+    if (role === "HUNTER") return "chat-bubble-hunter border-amber-300/30 bg-amber-400/5";
+    if (role === "DEVELOPER") return "chat-bubble-developer border-cyan-400/30 bg-cyan-400/5";
+    if (role === "CLIENT") return "chat-bubble-client border-violet-400/30 bg-violet-400/5";
+    return "border-white/10 bg-black/20";
+  };
 
-          <button
-            onClick={() => setActiveTab("milestones")}
-            className={`w-full flex items-center space-x-3 rounded-2xl p-4 text-sm font-semibold transition-all ${
-              activeTab === "milestones"
-                ? "bg-primary text-white"
-                : "glass-panel text-muted-foreground hover:text-white"
-            }`}
-          >
-            <DollarSign className="h-5 w-5" />
-            <span>Milestones & Escrow</span>
-          </button>
+  const formattedDevSplit = deal.budget * (deal.developerSplit / 100);
+  const formattedHunterSplit = deal.budget * (deal.hunterSplit / 100);
+  const formattedPlatformSplit = deal.budget * (deal.platformSplit / 100);
 
-          <button
-            onClick={() => setActiveTab("files")}
-            className={`w-full flex items-center space-x-3 rounded-2xl p-4 text-sm font-semibold transition-all ${
-              activeTab === "files"
-                ? "bg-primary text-white"
-                : "glass-panel text-muted-foreground hover:text-white"
-            }`}
-          >
-            <FileText className="h-5 w-5" />
-            <span>Secure Files</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab("ai")}
-            className={`w-full flex items-center space-x-3 rounded-2xl p-4 text-sm font-semibold transition-all ${
-              activeTab === "ai"
-                ? "bg-primary text-white"
-                : "glass-panel text-muted-foreground hover:text-white"
-            }`}
-          >
-            <Bot className="h-5 w-5" />
-            <span>AI OS Brief</span>
-          </button>
-
-          {/* Quick Active State Warning */}
-          {deal.state === "PENDING_PAYMENT" && (
-            <div className="rounded-2xl border border-amber-500/20 bg-amber-500/5 p-4 text-xs text-amber-400">
-              <div className="flex items-center space-x-2 font-bold mb-1">
-                <AlertTriangle className="h-4 w-4" />
-                <span>Escrow Funds Required</span>
+  return (
+    <div className="min-h-screen">
+      <div className="noise-overlay" />
+      <div className="app-grid min-h-screen">
+        <Navbar />
+        <main className="relative z-[1] mx-auto max-w-7xl px-4 pb-16 pt-8 sm:px-6">
+          
+          {/* Top Panel: Deal Meta and Split Ledger */}
+          <section className="grid gap-6 lg:grid-cols-[1.12fr_0.88fr]">
+            <AppSurface accent="amber" className="rounded-[2rem] p-6 sm:p-8">
+              <div className="flex flex-wrap items-center gap-3">
+                <Link href="/dashboard" className="ghost-button">
+                  <ArrowLeft className="h-4 w-4" />
+                  Dashboard
+                </Link>
+                <div className={`status-pill status-${deal.state.toLowerCase()}`}>{deal.state}</div>
               </div>
-              Onboarding and chat are operational, but developer workspace code commits remain locked until initial client payment is completed.
-            </div>
-          )}
-        </div>
 
-        {/* Tab Content Display Area */}
-        <div className="lg:col-span-3 min-h-[500px] flex flex-col glass-panel rounded-3xl p-6 overflow-hidden">
-          {/* TAB 1: Real-time Group Chat */}
-          {activeTab === "chat" && (
-            <div className="flex-1 flex flex-col h-full">
-              <div className="flex-1 overflow-y-auto space-y-4 max-h-[380px] mb-4 pr-2">
-                {deal.messages.map((msg) => (
-                  <div
-                    key={msg.id}
-                    className={`flex items-start space-x-3 ${
-                      msg.userId === currentUser?.id ? "flex-row-reverse space-x-reverse" : ""
-                    }`}
-                  >
-                    {msg.userAvatar ? (
-                      <img
-                        src={msg.userAvatar}
-                        alt={msg.userName}
-                        className="h-9 w-9 rounded-full object-cover border border-border"
-                      />
-                    ) : (
-                      <div className="h-9 w-9 rounded-full bg-zinc-800 flex items-center justify-center text-xs font-bold text-white border border-border">
-                        OS
-                      </div>
-                    )}
-                    <div
-                      className={`rounded-2xl p-4 text-sm ${
-                        msg.userId === currentUser?.id
-                          ? "bg-primary text-white rounded-tr-none"
-                          : "bg-black/60 border border-border text-zinc-300 rounded-tl-none"
-                      }`}
-                    >
-                      <span className="block text-[10px] text-zinc-400 font-bold mb-1">
-                        {msg.userName}
-                      </span>
-                      {msg.content}
-                    </div>
+              <h1 className="mt-5 max-w-3xl text-3xl font-bold tracking-tight text-white sm:text-4xl">
+                {deal.title}
+              </h1>
+              <p className="mt-3 max-w-2xl text-xs leading-6 text-slate-300">{deal.description}</p>
+
+              {/* Visually Divided Ledger Splits Bar (60/30/10 Split Visualizer) */}
+              <div className="mt-6">
+                <div className="flex justify-between text-[0.65rem] uppercase tracking-widest text-slate-400 mb-2 font-bold">
+                  <span>Visual Escrow Split Bar</span>
+                  <span>{deal.developerSplit}/{deal.hunterSplit}/{deal.platformSplit} distribution</span>
+                </div>
+                <div className="ledger-split-bar">
+                  <div className="ledger-split-dev" style={{ width: `${deal.developerSplit}%` }} title={`Developer: ${deal.developerSplit}%`} />
+                  <div className="ledger-split-hunter" style={{ width: `${deal.hunterSplit}%` }} title={`Hunter: ${deal.hunterSplit}%`} />
+                  <div className="ledger-split-platform" style={{ width: `${deal.platformSplit}%` }} title={`Platform: ${deal.platformSplit}%`} />
+                </div>
+                <div className="flex justify-between text-[0.62rem] text-slate-400 mt-2 font-semibold">
+                  <span className="text-cyan-300">Coder Split (${formattedDevSplit.toLocaleString()})</span>
+                  <span className="text-amber-300">Hunter Split (${formattedHunterSplit.toLocaleString()})</span>
+                  <span className="text-violet-300">Platform Split (${formattedPlatformSplit.toLocaleString()})</span>
+                </div>
+              </div>
+            </AppSurface>
+
+            {/* Escrow Activity Summary Card */}
+            <div className="grid gap-4">
+              <AppSurface accent="violet" className="rounded-[1.7rem] p-5">
+                <div className="flex items-center justify-between gap-3 border-b border-white/5 pb-3">
+                  <div>
+                    <div className="text-xs uppercase tracking-[0.24em] text-violet-200">Ledger balance</div>
+                    <div className="mt-1 text-2xl font-black text-white">${deal.budget.toLocaleString()}</div>
                   </div>
-                ))}
-                <div ref={chatEndRef} />
-              </div>
+                  <CircleDollarSign className="h-7 w-7 text-violet-200" />
+                </div>
 
-              {/* Chat Input */}
-              <form onSubmit={handleSendMessage} className="flex gap-2 border-t border-border pt-4">
-                <input
-                  type="text"
-                  value={messageText}
-                  onChange={(e) => setMessageText(e.target.value)}
-                  placeholder="Collaborate in real time..."
-                  className="flex-1 rounded-full border border-border bg-black px-5 py-3 text-sm focus:outline-none focus:border-primary"
-                />
-                <button
-                  type="submit"
-                  className="rounded-full bg-primary p-3 text-white hover:bg-blue-600 transition-colors"
-                >
-                  <Send className="h-4 w-4" />
-                </button>
-              </form>
+                <div className="mt-4 space-y-2 text-xs text-slate-300">
+                  <div className="flex justify-between">
+                    <span>Active Escrow Hold</span>
+                    <span className="text-white font-bold">
+                      {deal.state === "CREATED" || deal.state === "INVITED" || deal.state === "PENDING_PAYMENT" ? "$0" : `$${deal.budget.toLocaleString()}`}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Simulated Gateway</span>
+                    <span className="text-cyan-300 font-bold">UPI Checkout Active</span>
+                  </div>
+                  {deal.upiPaymentDetails?.upiId && (
+                    <div className="flex justify-between border-t border-white/5 pt-2 mt-2">
+                      <span>Paid From UPI</span>
+                      <span className="text-white font-mono">{deal.upiPaymentDetails.upiId}</span>
+                    </div>
+                  )}
+                </div>
+              </AppSurface>
+
+              <AppSurface accent="cyan" className="rounded-[1.7rem] p-5">
+                <div className="flex items-center gap-3">
+                  <ShieldCheck className="h-5 w-5 text-cyan-200" />
+                  <div className="font-semibold text-white">Trust escrow safeguards</div>
+                </div>
+                <p className="text-xs leading-6 text-slate-400 mt-2">
+                   escrow split payouts are governed by dual Client + Hunter completion checks. Coder receives exactly 60% upon dual sign-offs.
+                </p>
+              </AppSurface>
             </div>
-          )}
+          </section>
 
-          {/* TAB 2: Milestones & Escrow */}
-          {activeTab === "milestones" && (
+          {/* Matches & Onboarding Workspace Lanes */}
+          <section className="mt-8 grid gap-8 lg:grid-cols-[1fr_360px] items-start">
+            
+            {/* Left lane: Matchmaking and Workspace steps */}
             <div className="space-y-6">
-              <h2 className="font-display text-lg font-bold text-white">Escrow Payment Checkpoints</h2>
-              <div className="space-y-4">
-                {deal.milestones.map((m) => (
-                  <div key={m.id} className="bg-black/40 border border-border rounded-2xl p-5">
-                    <div className="flex items-start justify-between gap-4">
+              
+              {/* CREATED state: Waiting for Coder Acceptance */}
+              {deal.state === "CREATED" && (
+                <AppSurface accent="amber" className="rounded-[2rem] p-6 text-center">
+                  <Clock className="h-8 w-8 text-amber-300 mx-auto mb-3" />
+                  <h3 className="text-lg font-bold text-white">Pending Coder Proposal Response</h3>
+                  <p className="text-xs text-slate-300 mt-2 max-w-lg mx-auto leading-6">
+                    A work proposal has been sent to the developer. Elena Rostova is currently reviewing the deal splits and description. You will be notified instantly when she accepts or rejects.
+                  </p>
+                </AppSurface>
+              )}
+
+              {/* INVITED state: Hunter must Invite the Client */}
+              {deal.state === "INVITED" && (
+                <AppSurface accent="cyan" className="rounded-[2rem] p-6">
+                  <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                    <CheckCircle className="h-5 w-5 text-cyan-300" />
+                    <span>Developer Elena Rostova Accepted Proposal!</span>
+                  </h3>
+                  {deal.developerAcceptanceMessage && (
+                    <div className="mt-3 rounded-xl bg-cyan-400/5 border border-cyan-400/10 p-4 text-xs italic text-cyan-100">
+                      " {deal.developerAcceptanceMessage} "
+                    </div>
+                  )}
+
+                  {currentUser?.role === "HUNTER" ? (
+                    <div className="mt-6 border-t border-white/10 pt-5">
+                      <div className="text-xs uppercase tracking-[0.24em] text-slate-400 mb-3">Onboard Client to Workspace</div>
+                      <form onSubmit={handleInviteClient} className="flex gap-2">
+                        <input
+                          type="email"
+                          value={clientEmail}
+                          onChange={(e) => setClientEmail(e.target.value)}
+                          placeholder="client@company.com"
+                          className="glass-input text-xs"
+                          required
+                        />
+                        <button type="submit" disabled={sendingInvite} className="action-button action-button--primary py-2 px-5 text-xs shrink-0 font-semibold">
+                          {sendingInvite ? "Inviting..." : "Onboard Client"}
+                        </button>
+                      </form>
+                      {inviteFeedback && (
+                        <p className="text-[0.7rem] mt-2 text-cyan-300">{inviteFeedback}</p>
+                      )}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-slate-400 mt-5 leading-6 border-t border-white/5 pt-4">
+                      * Hunter (Marcus Vane) has been notified to send the onboarding invitation to Client Robert Kim.
+                    </p>
+                  )}
+                </AppSurface>
+              )}
+
+              {/* PENDING_PAYMENT state: Client inputs requirements & pays via UPI */}
+              {deal.state === "PENDING_PAYMENT" && (
+                <AppSurface accent="violet" className="rounded-[2rem] p-6">
+                  <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                    <Bot className="h-5 w-5 text-violet-300" />
+                    <span>Client Onboarding and UPI Funding Gate</span>
+                  </h3>
+
+                  {currentUser?.role === "CLIENT" ? (
+                    <form onSubmit={handleUpiPaymentSubmit} className="mt-5 space-y-4">
                       <div>
-                        <h3 className="font-semibold text-white">{m.title}</h3>
-                        <span className="text-xs text-muted-foreground block mt-1">
-                          Due Date: {new Date(m.dueDate).toLocaleDateString()}
-                        </span>
-                        <div className="mt-2 flex flex-wrap gap-1.5">
-                          {m.deliverables.map((del, idx) => (
-                            <span
-                              key={idx}
-                              className="rounded bg-zinc-900 border border-border text-[10px] text-zinc-400 px-2 py-0.5"
-                            >
-                              {del}
-                            </span>
-                          ))}
+                        <label className="block text-xs uppercase tracking-[0.24em] text-slate-400 mb-2">Project Brief / Website Requirements</label>
+                        <textarea
+                          value={clientRequirements}
+                          onChange={(e) => setClientRequirements(e.target.value)}
+                          placeholder="Detail the type of website, pages, styling and motion expectations..."
+                          className="glass-input bg-black/20 text-xs min-h-20"
+                          required
+                        />
+                      </div>
+
+                      <div className="grid md:grid-cols-2 gap-4 items-center border-t border-white/10 pt-5">
+                        
+                        {/* Simulated UPI QR Code visual */}
+                        <div className="upi-gate rounded-2xl p-4 text-center border border-white/5 relative overflow-hidden">
+                          <div className="upi-scanner-line" />
+                          <QrCode className="h-28 w-28 text-white mx-auto my-2" />
+                          <div className="text-[0.62rem] uppercase tracking-wider text-slate-400">Scan QR via GPay / PhonePe / Paytm</div>
+                        </div>
+
+                        {/* UPI ID input */}
+                        <div className="space-y-4">
+                          <div>
+                            <label className="block text-xs uppercase tracking-[0.24em] text-slate-400 mb-2">Enter UPI ID</label>
+                            <input
+                              type="text"
+                              value={clientUpiId}
+                              onChange={(e) => setClientUpiId(e.target.value)}
+                              placeholder="robert@okaxis"
+                              className="glass-input py-2.5 text-xs bg-black/20"
+                              required
+                            />
+                          </div>
+
+                          <button
+                            type="submit"
+                            disabled={payingEscrow || !clientRequirements.trim() || !clientUpiId.trim()}
+                            className="action-button action-button--primary w-full py-2.5 text-xs font-semibold"
+                          >
+                            {payingEscrow ? "Verifying Deposit..." : "Authorize Escrow Deposit via UPI"}
+                          </button>
                         </div>
                       </div>
 
-                      <div className="text-right">
-                        <span className="text-lg font-extrabold text-white block">
-                          ${m.amount.toLocaleString()}
-                        </span>
-                        <span className="text-[10px] uppercase font-bold text-primary block mt-1">
-                          {m.status}
-                        </span>
+                      {paymentFeedback && (
+                        <p className="text-[0.7rem] text-cyan-300 mt-2">{paymentFeedback}</p>
+                      )}
+                    </form>
+                  ) : (
+                    <div className="mt-5 text-center py-6 border border-dashed border-white/10 rounded-2xl">
+                      <Smartphone className="h-8 w-8 text-slate-500 mx-auto mb-2" />
+                      <p className="text-xs text-slate-400 max-w-sm mx-auto leading-6">
+                        Waiting for Client (Robert Kim) to join the workspace, outline their website requirements, and fund the escrow via UPI.
+                      </p>
+                    </div>
+                  )}
+                </AppSurface>
+              )}
+
+              {/* FUNDED / IN_PROGRESS / MILESTONE_REVIEW state: Delivery lanes */}
+              {["FUNDED", "ONBOARDING", "IN_PROGRESS", "MILESTONE_REVIEW", "PARTIALLY_RELEASED"].includes(deal.state) && (
+                <AppSurface accent="cyan" className="rounded-[2rem] p-6">
+                  
+                  {/* Scope outline visual */}
+                  <div className="mb-6 border-b border-white/5 pb-4">
+                    <div className="text-[0.65rem] uppercase tracking-[0.24em] text-slate-400 font-bold mb-2">Active Project Brief</div>
+                    <p className="text-xs text-slate-200 leading-6 italic">" {deal.clientRequirements || "Custom corporate website with high end transitions"} "</p>
+                  </div>
+
+                  {/* Delivery Actions based on deal.state and user role */}
+                  {deal.state !== "MILESTONE_REVIEW" ? (
+                    currentUser?.role === "DEVELOPER" ? (
+                      <div className="text-center py-4">
+                        <p className="text-xs text-slate-300 mb-4">Milestone is funded. Work is currently active. Once deliverables are complete, click below to submit for Hunter + Client sign-offs.</p>
+                        <button
+                          onClick={handleMarkDone}
+                          className="action-button action-button--primary text-xs font-semibold py-2.5 px-6 rounded-full"
+                        >
+                          Submit Final Delivery Work
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-3 text-xs text-slate-400 leading-6">
+                        <Clock className="h-5 w-5 text-cyan-300 shrink-0" />
+                        <span>Developer is currently building. You will be notified when deliverables are marked done.</span>
+                      </div>
+                    )
+                  ) : (
+                    
+                    /* MILESTONE_REVIEW: Dual Sign-off dashboard */
+                    <div className="space-y-4">
+                      <div className="text-xs uppercase tracking-widest text-cyan-300 font-bold">Review and Release Ledger Sign-offs</div>
+                      
+                      <div className="grid sm:grid-cols-2 gap-3 mt-3">
+                        
+                        {/* Client sign-off box */}
+                        <div className={`rounded-xl border p-4 text-xs ${
+                          deal.clientApprovedDone ? 'border-cyan-400/20 bg-cyan-400/5 text-cyan-300' : 'border-white/5 bg-black/10 text-slate-400'
+                        }`}>
+                          <div className="flex justify-between items-center">
+                            <span className="font-bold">Client Sign-off</span>
+                            <span className={`text-[0.6rem] uppercase tracking-wider px-2 py-0.5 rounded ${
+                              deal.clientApprovedDone ? 'bg-cyan-400/10 text-cyan-300' : 'bg-slate-400/10 text-slate-400'
+                            }`}>
+                              {deal.clientApprovedDone ? 'Approved' : 'Pending'}
+                            </span>
+                          </div>
+                          {deal.clientApprovedDone ? (
+                            <p className="mt-2 text-[0.7rem] text-cyan-200">Robert Kim confirmed work completion.</p>
+                          ) : (
+                            <p className="mt-2 text-[0.7rem]">Awaiting Client's tick sign-off.</p>
+                          )}
+                        </div>
+
+                        {/* Hunter sign-off box */}
+                        <div className={`rounded-xl border p-4 text-xs ${
+                          deal.hunterApprovedDone ? 'border-cyan-400/20 bg-cyan-400/5 text-cyan-300' : 'border-white/5 bg-black/10 text-slate-400'
+                        }`}>
+                          <div className="flex justify-between items-center">
+                            <span className="font-bold">Hunter Sign-off</span>
+                            <span className={`text-[0.6rem] uppercase tracking-wider px-2 py-0.5 rounded ${
+                              deal.hunterApprovedDone ? 'bg-cyan-400/10 text-cyan-300' : 'bg-slate-400/10 text-slate-400'
+                            }`}>
+                              {deal.hunterApprovedDone ? 'Approved' : 'Pending'}
+                            </span>
+                          </div>
+                          {deal.hunterApprovedDone ? (
+                            <p className="mt-2 text-[0.7rem] text-cyan-200">Marcus Vane confirmed work completion.</p>
+                          ) : (
+                            <p className="mt-2 text-[0.7rem]">Awaiting Hunter's tick sign-off.</p>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Approval CTA */}
+                      {((currentUser?.role === "CLIENT" && !deal.clientApprovedDone) ||
+                        (currentUser?.role === "HUNTER" && !deal.hunterApprovedDone)) && (
+                        <div className="mt-6 border-t border-white/5 pt-4 text-center">
+                          <p className="text-xs text-slate-300 mb-3">Please verify the files and click below to sign off on final release payouts.</p>
+                          <button
+                            onClick={handleSignOff}
+                            disabled={submittingSignOff}
+                            className="action-button action-button--primary text-xs font-semibold py-2.5 px-6 rounded-full"
+                          >
+                            {submittingSignOff ? "Signing Off..." : "Sign Off & Release Escrow"}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </AppSurface>
+              )}
+
+              {/* COMPLETED state: Payout Release logs and stats */}
+              {deal.state === "COMPLETED" && (
+                <AppSurface accent="cyan" className="rounded-[2rem] p-6 text-center">
+                  <CheckCircle className="h-10 w-10 text-cyan-300 mx-auto mb-4" />
+                  <h3 className="text-xl font-bold text-white tracking-tight">Escrow Ledger Distributed & Closed</h3>
+                  
+                  <div className="mt-5 rounded-2xl bg-cyan-400/5 border border-cyan-400/10 p-5 text-xs text-slate-300 max-w-lg mx-auto text-left space-y-3">
+                    <div className="flex justify-between font-semibold border-b border-cyan-400/10 pb-2 mb-2 text-cyan-300">
+                      <span>UPI Escrow released</span>
+                      <span>Total: ${deal.budget.toLocaleString()}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Coder Elena Rostova (60%)</span>
+                      <span className="text-white font-bold">${formattedDevSplit.toLocaleString()}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Hunter Marcus Vane (30%)</span>
+                      <span className="text-white font-bold">${formattedHunterSplit.toLocaleString()}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Telecode Fee (10%)</span>
+                      <span className="text-white font-bold">${formattedPlatformSplit.toLocaleString()}</span>
+                    </div>
+                  </div>
+
+                  <p className="text-xs text-slate-400 mt-5 leading-6">
+                    Dual Client (Robert Kim) and Hunter (Marcus Vane) ticks successfully completed. Platform fee locked. Thank you for using Telecode!
+                  </p>
+                </AppSurface>
+              )}
+
+            </div>
+
+            {/* Right Panel Tabs: Group Chat / Project Brief / Split visualizer */}
+            <div className="space-y-4 shrink-0 w-full md:w-[360px]">
+              
+              {/* Tab options selector */}
+              <div className="grid grid-cols-3 gap-1 bg-black/25 border border-white/10 rounded-full p-1 text-center">
+                <button
+                  onClick={() => setTab("chat")}
+                  className={`py-2 text-[0.68rem] font-bold rounded-full transition ${tab === "chat" ? "bg-white/10 text-white" : "text-slate-400"}`}
+                >
+                  Group Chat
+                </button>
+                <button
+                  onClick={() => setTab("brief")}
+                  className={`py-2 text-[0.68rem] font-bold rounded-full transition ${tab === "brief" ? "bg-white/10 text-white" : "text-slate-400"}`}
+                >
+                  Workspace
+                </button>
+                <button
+                  onClick={() => setTab("payments")}
+                  className={`py-2 text-[0.68rem] font-bold rounded-full transition ${tab === "payments" ? "bg-white/10 text-white" : "text-slate-400"}`}
+                >
+                  Splits
+                </button>
+              </div>
+
+              {/* Tab 1: 3-Party Group Chat */}
+              {tab === "chat" && (
+                <AppSurface accent="violet" className="rounded-[2rem] p-5 flex flex-col h-[520px] justify-between">
+                  <div className="flex items-center gap-2 border-b border-white/5 pb-3">
+                    <Users className="h-4 w-4 text-violet-300" />
+                    <span className="text-xs uppercase tracking-widest font-bold text-white">Group Workspace Chat</span>
+                  </div>
+
+                  {/* Messages box list */}
+                  <div className="flex-1 overflow-y-auto space-y-3 pr-1 my-3 scrollbar">
+                    {messages.length > 0 ? (
+                      messages.map((entry, idx) => (
+                        <div
+                          key={entry.id}
+                          className={`rounded-2xl border p-3 text-xs leading-6 ${chatBubbleRoleClass(entry.user?.role)}`}
+                        >
+                          <div className="flex items-center justify-between text-[0.62rem] text-slate-400 font-bold mb-1">
+                            <span>{entry.user?.name || "System"}</span>
+                            <span className="opacity-80 font-normal">{new Date(entry.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                          </div>
+                          <p className="text-slate-200 whitespace-pre-wrap">{entry.content}</p>
+                        </div>
+                      ))
+                    ) : (
+                      <p className="text-xs text-slate-500 text-center mt-20">No messages in project group chat yet.</p>
+                    )}
+                    <div ref={endRef} />
+                  </div>
+
+                  {/* Message submit form */}
+                  <form onSubmit={handleSendMessage} className="flex gap-1.5 border-t border-white/5 pt-3">
+                    <input
+                      value={message}
+                      onChange={(event) => setMessage(event.target.value)}
+                      placeholder="Send workspace update..."
+                      className="glass-input py-2 text-xs bg-black/20"
+                    />
+                    <button type="submit" className="action-button action-button--primary px-3 py-2 shrink-0">
+                      <Send className="h-3.5 w-3.5" />
+                    </button>
+                  </form>
+                </AppSurface>
+              )}
+
+              {/* Tab 2: Project Brief / Requirements summary */}
+              {tab === "brief" && (
+                <AppSurface accent="cyan" className="rounded-[2rem] p-5 space-y-4">
+                  <div className="flex items-center gap-2 border-b border-white/5 pb-3">
+                    <Bot className="h-4 w-4 text-cyan-300" />
+                    <span className="text-xs uppercase tracking-widest font-bold text-white">Onboarding Brief</span>
+                  </div>
+
+                  <div className="space-y-4 text-xs text-slate-300">
+                    <div className="bg-black/20 rounded-xl p-3.5 border border-white/5">
+                      <div className="font-bold text-white uppercase tracking-wider text-[0.65rem] mb-1.5 flex items-center gap-1">
+                        <CheckCircle className="h-3.5 w-3.5 text-cyan-300" />
+                        <span>Client Requirements</span>
+                      </div>
+                      <p className="leading-6 italic">
+                        {deal.clientRequirements ? `"${deal.clientRequirements}"` : "Awaiting client's detailed submission."}
+                      </p>
+                    </div>
+
+                    {deal.developerAcceptanceMessage && (
+                      <div className="bg-black/20 rounded-xl p-3.5 border border-white/5">
+                        <div className="font-bold text-white uppercase tracking-wider text-[0.65rem] mb-1.5 flex items-center gap-1">
+                          <CheckCircle className="h-3.5 w-3.5 text-cyan-300" />
+                          <span>Coder Offer Accept Message</span>
+                        </div>
+                        <p className="leading-6 italic">"{deal.developerAcceptanceMessage}"</p>
+                      </div>
+                    )}
+
+                    <div className="bg-black/20 rounded-xl p-3.5 border border-white/5">
+                      <div className="font-bold text-white uppercase tracking-wider text-[0.65rem] mb-1.5">Escrow Milestones</div>
+                      <div className="space-y-2 mt-2">
+                        {deal.milestones.map((m, idx) => (
+                          <div key={m.id} className="flex justify-between items-center text-[0.7rem] border-b border-white/5 pb-1.5 last:border-b-0 last:pb-0">
+                            <span className="text-slate-300 truncate max-w-44">{m.title}</span>
+                            <span className="font-bold text-white shrink-0">${m.amount.toLocaleString()}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </AppSurface>
+              )}
+
+              {/* Tab 3: Escrow split details */}
+              {tab === "payments" && (
+                <AppSurface accent="amber" className="rounded-[2rem] p-5 space-y-4">
+                  <div className="flex items-center gap-2 border-b border-white/5 pb-3">
+                    <Wallet className="h-4 w-4 text-amber-300" />
+                    <span className="text-xs uppercase tracking-widest font-bold text-white">Escrow Distribution</span>
+                  </div>
+
+                  <div className="space-y-3.5 text-xs text-slate-300">
+                    <div className="bg-black/20 rounded-xl p-4 border border-white/5 space-y-2.5">
+                      <div className="flex justify-between items-center text-[0.7rem]">
+                        <span>Escrow Hold State</span>
+                        <span className={`text-[0.62rem] uppercase tracking-wider font-bold ${
+                          deal.state === "COMPLETED" ? "text-cyan-300" : "text-amber-300"
+                        }`}>{deal.state === "COMPLETED" ? "Released" : "Holding"}</span>
+                      </div>
+                      <div className="flex justify-between items-center">
+                        <span>escrow deposits</span>
+                        <span className="text-white font-bold">${deal.budget.toLocaleString()}</span>
                       </div>
                     </div>
 
-                    {/* Milestone Actions based on User Roles */}
-                    <div className="flex justify-end space-x-2 border-t border-border/60 mt-4 pt-3">
-                      {m.status === "PENDING" && currentUser?.role === "DEVELOPER" && (
-                        <button
-                          onClick={() => submitMilestone(deal.id, m.id)}
-                          className="rounded-full bg-primary text-white text-xs px-3.5 py-1.5 hover:bg-blue-600 font-semibold"
-                        >
-                          Submit Milestone Assets
-                        </button>
-                      )}
-
-                      {m.status === "SUBMITTED" && currentUser?.role === "CLIENT" && (
-                        <>
-                          <button
-                            onClick={() => requestRevision(deal.id, m.id)}
-                            className="rounded-full bg-zinc-950 border border-border text-xs px-3.5 py-1.5 hover:bg-zinc-900 font-semibold text-zinc-300"
-                          >
-                            Request Scope Revision
-                          </button>
-                          <button
-                            onClick={() => approveMilestone(deal.id, m.id)}
-                            className="rounded-full bg-emerald-500 text-white text-xs px-3.5 py-1.5 hover:bg-emerald-600 font-semibold"
-                          >
-                            Approve & Release Funds
-                          </button>
-                        </>
-                      )}
+                    <div className="bg-black/20 rounded-xl p-4 border border-white/5 space-y-3">
+                      <div className="font-semibold text-white uppercase tracking-wider text-[0.65rem] border-b border-white/5 pb-2">
+                        Distribution Ledger (60/30/10)
+                      </div>
+                      <div className="flex justify-between items-center">
+                        <span className="text-cyan-300 font-bold">Developer Split (60%)</span>
+                        <span className="text-white font-bold">${formattedDevSplit.toLocaleString()}</span>
+                      </div>
+                      <div className="flex justify-between items-center">
+                        <span className="text-amber-300 font-bold">Hunter Split (30%)</span>
+                        <span className="text-white font-bold">${formattedHunterSplit.toLocaleString()}</span>
+                      </div>
+                      <div className="flex justify-between items-center">
+                        <span className="text-violet-300 font-bold">Platform Split (10%)</span>
+                        <span className="text-white font-bold">${formattedPlatformSplit.toLocaleString()}</span>
+                      </div>
                     </div>
                   </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* TAB 3: Secure Files */}
-          {activeTab === "files" && (
-            <div className="space-y-6">
-              <h2 className="font-display text-lg font-bold text-white">S3-compatible File Storage</h2>
-
-              {/* Upload form */}
-              <form onSubmit={handleUploadFile} className="flex gap-2">
-                <input
-                  type="text"
-                  value={newFileName}
-                  onChange={(e) => setNewFileName(e.target.value)}
-                  placeholder="e.g. Design-Brief-V2.fig"
-                  className="flex-1 rounded-full border border-border bg-black px-4 py-2.5 text-sm focus:outline-none focus:border-primary"
-                />
-                <button
-                  type="submit"
-                  className="rounded-full bg-primary px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-600 flex items-center space-x-1.5"
-                >
-                  <Upload className="h-4 w-4" />
-                  <span>Upload File</span>
-                </button>
-              </form>
-
-              {/* Files table */}
-              <div className="border border-border rounded-2xl overflow-hidden bg-black/20">
-                <div className="grid grid-cols-3 gap-4 border-b border-border bg-zinc-950 p-4 text-xs font-semibold uppercase text-muted-foreground">
-                  <div>Name</div>
-                  <div>Size</div>
-                  <div className="text-right">Date</div>
-                </div>
-                <div className="divide-y divide-border">
-                  {uploadedFiles.map((file, idx) => (
-                    <div key={idx} className="grid grid-cols-3 gap-4 p-4 text-sm text-zinc-300">
-                      <div className="truncate font-medium">{file.name}</div>
-                      <div>{file.size}</div>
-                      <div className="text-right text-muted-foreground">{file.date}</div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* TAB 4: AI OS Brief */}
-          {activeTab === "ai" && (
-            <div className="space-y-6">
-              <div className="flex items-center justify-between border-b border-border pb-4">
-                <h2 className="font-display text-lg font-bold text-white flex items-center space-x-2">
-                  <Bot className="h-5 w-5 text-primary" />
-                  <span>Nexus AI Partnership Alignment</span>
-                </h2>
-
-                {!deal.aiSummary && (
-                  <button
-                    onClick={handleAiGeneration}
-                    disabled={isGeneratingAi}
-                    className="rounded-full bg-primary px-4 py-2 text-xs font-bold text-white hover:bg-blue-600 disabled:opacity-50"
-                  >
-                    {isGeneratingAi ? "Processing Call Transcription..." : "Extract Meeting Summary"}
-                  </button>
-                )}
-              </div>
-
-              {deal.aiSummary ? (
-                <div className="space-y-4 animate-in fade-in duration-300">
-                  <div className="bg-primary/5 border border-primary/20 rounded-2xl p-5">
-                    <h3 className="font-semibold text-white mb-2">Scope Summary</h3>
-                    <p className="text-zinc-300 text-sm font-light leading-relaxed">
-                      {deal.aiSummary.summary}
-                    </p>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="bg-black/40 border border-border rounded-2xl p-5">
-                      <h4 className="font-semibold text-white mb-3">Extracted Deliverables</h4>
-                      <ul className="space-y-2 text-xs text-zinc-400">
-                        {deal.aiSummary.deliverables.map((d, i) => (
-                          <li key={i} className="flex items-center space-x-2">
-                            <Check className="h-3.5 w-3.5 text-primary shrink-0" />
-                            <span>{d}</span>
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-
-                    <div className="bg-black/40 border border-border rounded-2xl p-5">
-                      <h4 className="font-semibold text-white mb-3">Safety Revision Guardrails</h4>
-                      <ul className="space-y-2 text-xs text-zinc-400">
-                        {deal.aiSummary.revisionRules.map((r, i) => (
-                          <li key={i} className="flex items-center space-x-2">
-                            <Check className="h-3.5 w-3.5 text-primary shrink-0" />
-                            <span>{r}</span>
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  </div>
-                </div>
-              ) : (
-                <div className="text-center py-12 text-muted-foreground font-light">
-                  Click 'Extract Meeting Summary' to trigger AI transcription alignment of requirements.
-                </div>
+                </AppSurface>
               )}
+
             </div>
-          )}
-        </div>
-      </main>
+          </section>
+
+        </main>
+      </div>
     </div>
   );
 }

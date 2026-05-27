@@ -1,5 +1,5 @@
 datasource db {
-  provider  = "postgresql"
+  provider = "postgresql"
 }
 
 generator client {
@@ -28,6 +28,13 @@ enum DealState {
   CANCELLED
 }
 
+enum DealParticipantRole {
+  CLIENT
+  DEVELOPER
+  HUNTER
+  ADMIN
+}
+
 enum MilestoneStatus {
   PENDING
   SUBMITTED
@@ -39,173 +46,364 @@ enum PaymentStatus {
   PENDING
   HELD_IN_ESCROW
   RELEASED
+  PARTIALLY_RELEASED
   REFUNDED
   FAILED
 }
 
+enum PaymentKind {
+  DEPOSIT
+  MILESTONE
+  PAYOUT
+  REFUND
+  FEE
+}
+
+enum NotificationType {
+  PAYMENT_RECEIVED
+  MILESTONE_APPROVED
+  REVISION_REQUESTED
+  NEW_MESSAGE
+  CALL_STARTED
+  DISPUTE_OPENED
+  SYSTEM
+}
+
+enum DisputeStatus {
+  OPEN
+  REVIEWING
+  RESOLVED_RELEASE
+  RESOLVED_REFUND
+  RESOLVED_PARTIAL
+  CLOSED
+}
+
+enum FileCategory {
+  DELIVERABLE
+  CONTRACT
+  BRIEF
+  RECORDING
+  CHAT_ATTACHMENT
+  OTHER
+}
+
 model User {
-  id            String    @id @default(uuid())
-  email         String    @unique
-  name          String?
-  avatarUrl     String?
-  role          Role      @default(CLIENT)
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-  isDeleted     Boolean   @default(false)
+  id             String    @id @default(uuid())
+  email          String    @unique
+  passwordHash   String?
+  name           String?
+  avatarUrl      String?
+  role           Role      @default(CLIENT)
+  stripeAccountId String?
+  googleId       String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  deletedAt      DateTime?
+  isDeleted      Boolean   @default(false)
 
-  // Profile Relations
-  devProfile    DeveloperProfile?
-  hunterProfile HunterProfile?
-  clientProfile ClientProfile?
+  devProfile     DeveloperProfile?
+  hunterProfile  HunterProfile?
+  clientProfile  ClientProfile?
+  sessions       Session[]
+  posts          Post[]
 
-  // Deal Relations
   dealsAsClient    Deal[] @relation("ClientDeals")
   dealsAsDeveloper Deal[] @relation("DeveloperDeals")
   dealsAsHunter    Deal[] @relation("HunterDeals")
+  dealParticipants DealParticipant[]
 
-  // Workspace Interactions
-  messages      Message[]
-  disputesFiled Dispute[] @relation("DisputeFiler")
-  reviewsGiven  Review[]  @relation("ReviewGiver")
-  reviewsRecd   Review[]  @relation("ReviewReceiver")
-  notifications Notification[]
-  activityLogs  ActivityLog[]
+  messages        Message[]
+  disputesFiled   Dispute[] @relation("DisputeFiler")
+  reviewsGiven    Review[]  @relation("ReviewGiver")
+  reviewsReceived Review[]  @relation("ReviewReceiver")
+  notifications   Notification[]
+  activityLogs    ActivityLog[]
+  callMemberships CallParticipant[]
+
+  @@index([role, createdAt])
+  @@index([isDeleted])
+}
+
+model Session {
+  id           String   @id @default(uuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash    String   @unique
+  ipAddress    String?
+  userAgent    String?
+  expiresAt    DateTime
+  createdAt    DateTime @default(now())
+  revokedAt    DateTime?
+
+  @@index([userId, expiresAt])
+}
+
+model PasswordResetToken {
+  id          String   @id @default(uuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash   String   @unique
+  expiresAt   DateTime
+  consumedAt  DateTime?
+  createdAt   DateTime @default(now())
+
+  @@index([userId, expiresAt])
 }
 
 model DeveloperProfile {
-  id                String   @id @default(uuid())
-  userId            String   @unique
-  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  bio               String?
-  skills            String[]
-  stack             String[]
-  portfolioLinks    String[]
-  earningsTotal     Float    @default(0.0)
-  availability      Boolean  @default(true)
-  isVerified        Boolean  @default(false)
-  ratingAvg         Float    @default(0.0)
+  id             String   @id @default(uuid())
+  userId         String   @unique
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  headline       String?
+  bio            String?
+  location       String?
+  skills         String[]
+  stack          String[]
+  portfolioLinks String[]
+  socialLinks    Json?
+  experience     Json?
+  education      Json?
+  earningsTotal  Float    @default(0)
+  availability   Boolean  @default(true)
+  isVerified     Boolean  @default(false)
+  ratingAvg      Float    @default(0)
+  completedProjects Int   @default(0)
 }
 
 model HunterProfile {
-  id                String   @id @default(uuid())
-  userId            String   @unique
-  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  industries        String[]
-  closedDealsCount  Int      @default(0)
-  conversionRate    Float    @default(0.0)
-  ratingAvg         Float    @default(0.0)
+  id               String   @id @default(uuid())
+  userId           String   @unique
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  industries       String[]
+  testimonials     Json?
+  communicationScore Float  @default(0)
+  closedDealsCount Int      @default(0)
+  conversionRate   Float    @default(0)
+  ratingAvg        Float    @default(0)
 }
 
 model ClientProfile {
-  id                String   @id @default(uuid())
-  userId            String   @unique
-  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  companyName       String?
-  industry          String?
-  isVerified        Boolean  @default(false)
-  paymentReliability Float   @default(100.0)
+  id                 String   @id @default(uuid())
+  userId             String   @unique
+  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  companyName        String?
+  headline           String?
+  location           String?
+  website            String?
+  bio                String?
+  teamSize           Int      @default(1)
+  fundingStage       String?
+  companyMetadata    Json?
+  isVerified         Boolean  @default(false)
+  paymentReliability Float    @default(100)
+}
+
+model Post {
+  id          String   @id @default(uuid())
+  authorId    String
+  author      User     @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  content     String
+  imageUrl    String?
+  likesCount  Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([authorId, createdAt])
 }
 
 model Deal {
-  id              String    @id @default(uuid())
-  title           String
-  description     String
-  budget          Float
-  state           DealState @default(CREATED)
-  
-  // Splits (Immutable once Deal transitions from CREATED/INVITED)
-  developerSplit  Float     @default(70.0) // 70% to Developer
-  hunterSplit     Float     @default(20.0) // 20% to Hunter
-  platformSplit   Float     @default(10.0) // 10% to Platform
+  id                String    @id @default(uuid())
+  title             String
+  description       String
+  budget            Float
+  currency          String    @default("USD")
+  state             DealState @default(CREATED)
+  developerSplit    Float     @default(70)
+  hunterSplit       Float     @default(20)
+  platformSplit     Float     @default(10)
+  splitLockedAt     DateTime?
+  timelineWeeks     Int
+  inviteLink        String    @unique @default(uuid())
+  escrowDepositDueAt DateTime?
+  fundedAt          DateTime?
+  completedAt       DateTime?
 
-  timelineWeeks   Int
-  inviteLink      String    @unique @default(uuid())
+  clientId          String?
+  client            User?     @relation("ClientDeals", fields: [clientId], references: [id])
+  developerId       String?
+  developer         User?     @relation("DeveloperDeals", fields: [developerId], references: [id])
+  hunterId          String
+  hunter            User      @relation("HunterDeals", fields: [hunterId], references: [id])
 
-  // Core Role Connections
-  clientId        String?
-  client          User?     @relation("ClientDeals", fields: [clientId], references: [id])
-  developerId     String?
-  developer       User?     @relation("DeveloperDeals", fields: [developerId], references: [id])
-  hunterId        String
-  hunter          User      @relation("HunterDeals", fields: [hunterId], references: [id])
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  deletedAt         DateTime?
+  isDeleted         Boolean   @default(false)
 
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
-  isDeleted       Boolean   @default(false)
+  participants      DealParticipant[]
+  milestones        Milestone[]
+  payments          Payment[]
+  payoutRules       PayoutRule[]
+  messages          Message[]
+  files             File[]
+  disputes          Dispute[]
+  reviews           Review[]
+  notifications     Notification[]
+  callSessions      CallSession[]
+  activityLogs      ActivityLog[]
+  aiSummary         AiSummary?
 
-  // Sub-workspace elements
-  milestones      Milestone[]
-  payments        Payment[]
-  messages        Message[]
-  files           File[]
-  disputes        Dispute[]
-  reviews         Review[]
-  activityLogs    ActivityLog[]
-  aiSummary       AiSummary?
+  @@index([state, createdAt])
+  @@index([hunterId, state])
+  @@index([clientId, state])
+  @@index([developerId, state])
+}
+
+model DealParticipant {
+  id        String              @id @default(uuid())
+  dealId     String
+  deal       Deal               @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  userId      String
+  user        User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role        DealParticipantRole
+  joinedAt    DateTime           @default(now())
+
+  @@unique([dealId, userId, role])
+  @@index([userId, role])
 }
 
 model Milestone {
-  id              String          @id @default(uuid())
-  dealId          String
-  deal            Deal            @relation(fields: [dealId], references: [id], onDelete: Cascade)
-  title           String
-  amount          Float
-  dueDate         DateTime
-  deliverables    String[]
-  status          MilestoneStatus @default(PENDING)
-  revisionCount   Int             @default(0)
-  maxRevisions    Int             @default(3)
-  createdAt       DateTime        @default(now())
-  updatedAt       DateTime        @updatedAt
+  id             String          @id @default(uuid())
+  dealId         String
+  deal           Deal            @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  title          String
+  amount         Float
+  dueDate        DateTime
+  deliverables   String[]
+  status         MilestoneStatus @default(PENDING)
+  submissionNotes String?
+  approvalNotes  String?
+  revisionCount  Int             @default(0)
+  maxRevisions   Int             @default(3)
+  submittedAt    DateTime?
+  approvedAt     DateTime?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
 
-  files           File[]
+  files          File[]
+
+  @@index([dealId, status])
+  @@index([dueDate])
 }
 
 model Payment {
-  id                String        @id @default(uuid())
-  dealId            String
-  deal              Deal          @relation(fields: [dealId], references: [id], onDelete: Cascade)
-  stripeIntentId    String?       @unique
-  stripeChargeId    String?
-  amount            Float
-  status            PaymentStatus @default(PENDING)
-  createdAt         DateTime      @default(now())
-  updatedAt         DateTime      @updatedAt
+  id                   String        @id @default(uuid())
+  dealId               String
+  deal                 Deal          @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  milestoneId          String?
+  amount               Float
+  currency             String        @default("USD")
+  kind                 PaymentKind   @default(MILESTONE)
+  status               PaymentStatus @default(PENDING)
+  stripeIntentId       String?       @unique
+  stripeChargeId       String?
+  stripeTransferGroup  String?
+  providerReference    String?
+  metadata             Json?
+  availableAt          DateTime?
+  releasedAt           DateTime?
+  refundedAt           DateTime?
+  createdAt            DateTime      @default(now())
+  updatedAt            DateTime      @updatedAt
+
+  @@index([dealId, status, createdAt])
+}
+
+model PayoutRule {
+  id          String   @id @default(uuid())
+  dealId       String
+  deal         Deal     @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  recipientId  String
+  recipient    User     @relation(fields: [recipientId], references: [id], onDelete: Cascade)
+  percentage   Float
+  createdAt    DateTime @default(now())
+
+  @@index([dealId, recipientId])
 }
 
 model Message {
-  id        String   @id @default(uuid())
-  dealId    String
-  deal      Deal     @relation(fields: [dealId], references: [id], onDelete: Cascade)
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  content   String
-  createdAt DateTime @default(now())
+  id          String   @id @default(uuid())
+  dealId      String
+  deal        Deal     @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  content     String
+  metadata    Json?
+  createdAt   DateTime @default(now())
+
+  @@index([dealId, createdAt])
 }
 
 model File {
-  id          String     @id @default(uuid())
+  id          String       @id @default(uuid())
   dealId      String
-  deal        Deal       @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  deal        Deal         @relation(fields: [dealId], references: [id], onDelete: Cascade)
   milestoneId String?
-  milestone   Milestone? @relation(fields: [milestoneId], references: [id])
+  milestone   Milestone?   @relation(fields: [milestoneId], references: [id])
+  uploaderId  String?
+  category    FileCategory @default(OTHER)
   name        String
   url         String
+  storageKey  String?
+  version     Int          @default(1)
   sizeBytes   Int
   mimeType    String
-  uploadedAt  DateTime   @default(now())
+  uploadedAt  DateTime     @default(now())
+
+  @@index([dealId, category, uploadedAt])
+}
+
+model CallSession {
+  id             String   @id @default(uuid())
+  dealId         String
+  deal           Deal     @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  providerRoomId String?
+  startedById    String
+  recordingUrl   String?
+  startedAt      DateTime @default(now())
+  endedAt        DateTime?
+
+  participants   CallParticipant[]
+
+  @@index([dealId, startedAt])
+}
+
+model CallParticipant {
+  id            String      @id @default(uuid())
+  callSessionId String
+  callSession   CallSession @relation(fields: [callSessionId], references: [id], onDelete: Cascade)
+  userId        String
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  joinedAt      DateTime    @default(now())
+  leftAt        DateTime?
+
+  @@index([callSessionId, userId])
 }
 
 model Dispute {
-  id            String   @id @default(uuid())
+  id            String        @id @default(uuid())
   dealId        String
-  deal          Deal     @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  deal          Deal          @relation(fields: [dealId], references: [id], onDelete: Cascade)
   filerId       String
-  filer         User     @relation("DisputeFiler", fields: [filerId], references: [id])
+  filer         User          @relation("DisputeFiler", fields: [filerId], references: [id])
+  status        DisputeStatus @default(OPEN)
   reason        String
   evidenceNotes String?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  resolutionNotes String?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  @@index([dealId, status])
 }
 
 model Review {
@@ -216,19 +414,27 @@ model Review {
   giver       User     @relation("ReviewGiver", fields: [giverId], references: [id])
   receiverId  String
   receiver    User     @relation("ReviewReceiver", fields: [receiverId], references: [id])
-  rating      Int      // 1-5 stars
+  rating      Int
   feedback    String?
   createdAt   DateTime @default(now())
+
+  @@unique([dealId, giverId, receiverId])
+  @@index([receiverId, createdAt])
 }
 
 model Notification {
-  id        String   @id @default(uuid())
+  id        String           @id @default(uuid())
   userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  dealId    String?
+  deal      Deal?            @relation(fields: [dealId], references: [id])
+  type      NotificationType @default(SYSTEM)
   title     String
   message   String
-  isRead    Boolean  @default(false)
-  createdAt DateTime @default(now())
+  isRead    Boolean          @default(false)
+  createdAt DateTime         @default(now())
+
+  @@index([userId, isRead, createdAt])
 }
 
 model ActivityLog {
@@ -239,16 +445,21 @@ model ActivityLog {
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   action    String
   details   String?
+  metadata  Json?
   timestamp DateTime @default(now())
+
+  @@index([dealId, timestamp])
+  @@index([userId, timestamp])
 }
 
 model AiSummary {
-  id              String   @id @default(uuid())
-  dealId          String   @unique
-  deal            Deal     @relation(fields: [dealId], references: [id], onDelete: Cascade)
-  transcription   String?
-  summary         String
-  deliverables    String[]
-  revisionRules   String[]
-  createdAt       DateTime @default(now())
+  id            String   @id @default(uuid())
+  dealId        String   @unique
+  deal          Deal     @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  transcription String?
+  summary       String
+  deliverables  String[]
+  revisionRules String[]
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 }

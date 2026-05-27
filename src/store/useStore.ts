@@ -21,7 +21,7 @@ export interface User {
   email: string;
   name: string;
   role: Role;
-  avatarUrl: string;
+  avatarUrl?: string;
 }
 
 export interface Milestone {
@@ -66,6 +66,16 @@ export interface Deal {
     deliverables: string[];
     revisionRules: string[];
   };
+  developerAcceptanceMessage?: string;
+  clientRequirements?: string;
+  developerMarkedDone?: boolean;
+  clientApprovedDone?: boolean;
+  hunterApprovedDone?: boolean;
+  upiPaymentDetails?: {
+    upiId?: string;
+    transactionId?: string;
+    paidAt?: string;
+  };
 }
 
 interface PlatformState {
@@ -90,8 +100,8 @@ const initialDeals: Deal[] = [
     description: "Build an ultra-luxurious, animation-rich website for 'IronPulse Athletics' brand.",
     budget: 4500,
     state: "FUNDED",
-    developerSplit: 70,
-    hunterSplit: 20,
+    developerSplit: 60,
+    hunterSplit: 30,
     platformSplit: 10,
     timelineWeeks: 4,
     hunterId: "hunter-1",
@@ -137,7 +147,7 @@ const initialDeals: Deal[] = [
         userId: "hunter-1",
         userName: "Marcus Vane (Hunter)",
         userAvatar: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80",
-        content: "Deal successfully negotiated and split locked at 70/20/10. Client is thrilled!",
+        content: "Deal successfully negotiated and split locked at 60/30/10. Client is thrilled!",
         createdAt: new Date(Date.now() - 3600000 * 24).toISOString(),
       },
       {
@@ -176,7 +186,7 @@ export const useStore = create<PlatformState>((set) => ({
             id: `msg-${Date.now()}`,
             dealId: "",
             userId: "system",
-            userName: "Nexus OS",
+            userName: "telecode OS",
             userAvatar: "",
             content: "Deal Workspace created successfully. Pending client funding invitation.",
             createdAt: new Date().toISOString(),

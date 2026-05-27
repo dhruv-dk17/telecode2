@@ -1,124 +1,98 @@
 "use client";
 
+import { useEffect } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { motion } from "framer-motion";
+import { ArrowRight, BellRing, LogOut, WalletCards } from "lucide-react";
+import { getCurrentUserAction, logoutAction } from "@/app/actions/auth";
 import { useStore } from "@/store/useStore";
-import { Briefcase, ArrowRight, User as UserIcon } from "lucide-react";
 
 export function Navbar() {
   const { currentUser, setCurrentUser } = useStore();
+  const router = useRouter();
 
-  const handleRoleChange = (role: "HUNTER" | "DEVELOPER" | "CLIENT" | "ADMIN") => {
-    const rolesMap = {
-      HUNTER: {
-        id: "hunter-1",
-        email: "marcus.hunter@nexus.io",
-        name: "Marcus Vane",
-        role: "HUNTER" as const,
-        avatarUrl: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80",
-      },
-      DEVELOPER: {
-        id: "dev-1",
-        email: "elena.dev@nexus.io",
-        name: "Elena Rostova",
-        role: "DEVELOPER" as const,
-        avatarUrl: "https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?auto=format&fit=crop&w=150&q=80",
-      },
-      CLIENT: {
-        id: "client-1",
-        email: "robert.client@nexus.io",
-        name: "Robert K.",
-        role: "CLIENT" as const,
-        avatarUrl: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=150&q=80",
-      },
-      ADMIN: {
-        id: "admin-1",
-        email: "admin@nexus.io",
-        name: "System Admin",
-        role: "ADMIN" as const,
-        avatarUrl: "https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?auto=format&fit=crop&w=150&q=80",
-      },
-    };
-    setCurrentUser(rolesMap[role]);
-  };
+  useEffect(() => {
+    async function loadUser() {
+      const user = await getCurrentUserAction();
+      if (user) {
+        setCurrentUser({
+          id: user.id,
+          email: user.email,
+          name: user.name,
+          role: user.role,
+          avatarUrl: "",
+        });
+        return;
+      }
+
+      setCurrentUser(null);
+    }
+
+    void loadUser();
+  }, [setCurrentUser]);
+
+  async function handleLogout() {
+    await logoutAction();
+    setCurrentUser(null);
+    router.push("/");
+  }
 
   return (
-    <header className="sticky top-0 z-50 w-full border-b border-border bg-[#030303]/80 backdrop-blur-md">
-      <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-6">
-        {/* Brand */}
-        <Link href="/" className="flex items-center space-x-2">
-          <Briefcase className="h-6 w-6 text-primary" />
-          <span className="font-display text-xl font-bold tracking-tight text-white">
-            NEXUS<span className="text-primary">AGENCY</span>
-          </span>
+    <header className="sticky top-0 z-50 px-4 pt-4 sm:px-6">
+      <motion.div
+        initial={{ opacity: 0, y: -14 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="mx-auto flex max-w-7xl items-center justify-between rounded-full border border-white/10 bg-[rgba(7,17,31,0.7)] px-5 py-3 shadow-[0_18px_40px_rgba(2,8,23,0.28)] backdrop-blur-xl"
+      >
+        <Link href="/" className="flex items-center gap-3">
+          <div className="flex h-11 w-11 items-center justify-center rounded-full border border-amber-300/30 bg-amber-400/10 text-amber-300">
+            <WalletCards className="h-5 w-5" />
+          </div>
+          <div>
+            <div className="font-display text-sm uppercase tracking-[0.36em] text-white">Telecode</div>
+            <div className="text-[0.68rem] uppercase tracking-[0.24em] text-slate-400">
+              Transaction OS
+            </div>
+          </div>
         </Link>
 
-        {/* Dynamic Navigation */}
-        <nav className="hidden md:flex items-center space-x-8 text-sm font-medium text-muted-foreground">
-          <Link href="#features" className="transition-colors hover:text-white">
-            Features
+        <nav className="hidden items-center gap-7 text-sm font-medium md:flex">
+          <Link href="/#features" className="nav-link">
+            Capabilities
           </Link>
-          <Link href="#how-it-works" className="transition-colors hover:text-white">
-            How It Works
+          <Link href="/dashboard" className="nav-link">
+            Deal Command
           </Link>
-          <Link href="#escrow" className="transition-colors hover:text-white">
-            Escrow Tech
+          <Link href="/feed" className="nav-link">
+            Network Feed
           </Link>
         </nav>
 
-        {/* Role Selector & CTA */}
-        <div className="flex items-center space-x-4">
-          <div className="hidden lg:flex items-center space-x-1 glass-panel rounded-full p-1 text-xs">
-            <button
-              onClick={() => handleRoleChange("HUNTER")}
-              className={`rounded-full px-3 py-1 font-medium transition-all ${
-                currentUser?.role === "HUNTER"
-                  ? "bg-primary text-white"
-                  : "text-muted-foreground hover:text-white"
-              }`}
-            >
-              Hunter
-            </button>
-            <button
-              onClick={() => handleRoleChange("DEVELOPER")}
-              className={`rounded-full px-3 py-1 font-medium transition-all ${
-                currentUser?.role === "DEVELOPER"
-                  ? "bg-primary text-white"
-                  : "text-muted-foreground hover:text-white"
-              }`}
-            >
-              Dev
-            </button>
-            <button
-              onClick={() => handleRoleChange("CLIENT")}
-              className={`rounded-full px-3 py-1 font-medium transition-all ${
-                currentUser?.role === "CLIENT"
-                  ? "bg-primary text-white"
-                  : "text-muted-foreground hover:text-white"
-              }`}
-            >
-              Client
-            </button>
-            <button
-              onClick={() => handleRoleChange("ADMIN")}
-              className={`rounded-full px-3 py-1 font-medium transition-all ${
-                currentUser?.role === "ADMIN"
-                  ? "bg-primary text-white"
-                  : "text-muted-foreground hover:text-white"
-              }`}
-            >
-              Admin
-            </button>
-          </div>
+        <div className="flex items-center gap-3">
+          {currentUser ? (
+            <div className="flex items-center gap-3">
+              <div className="hidden items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-xs text-slate-300 sm:flex">
+                <BellRing className="h-3.5 w-3.5 text-cyan-300" />
+                <span className="font-semibold uppercase tracking-[0.2em] text-white">
+                  {currentUser.role}
+                </span>
+                <span className="text-slate-500">/</span>
+                <span>{currentUser.name}</span>
+              </div>
 
-          <Link
-            href="/dashboard"
-            className="flex items-center space-x-1.5 rounded-full bg-white px-4 py-2 text-sm font-semibold text-black transition-all hover:bg-neutral-200"
-          >
-            <span>Enter App</span>
-            <ArrowRight className="h-4 w-4" />
-          </Link>
+              <button onClick={handleLogout} className="ghost-button p-3" title="Logout">
+                <LogOut className="h-4 w-4" />
+              </button>
+            </div>
+          ) : (
+            <Link href="/#auth" className="action-button action-button--primary text-sm">
+              <span>Secure Onboarding</span>
+              <ArrowRight className="h-4 w-4" />
+            </Link>
+          )}
         </div>
-      </div>
+      </motion.div>
     </header>
   );
 }

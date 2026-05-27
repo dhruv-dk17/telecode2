@@ -1,50 +1,58 @@
-# NexusAgency — Operating System for Digital Partnerships
+# telecode
 
-NexusAgency is an ultra-premium, cinematic, fullstack collaboration and marketplace platform designed for high-performance agency partnerships. It combines **Fiverr-style secure escrows**, **Slack-grade real-time workspaces**, **Notion-style deliverables tracking**, and **Stripe-grade premium fintech UX**—all optimized for **100% free-tier hosting**.
+Telecode is a premium agency collaboration platform for hunters, developers, clients, and admins. This repo now ships with a production-oriented app skeleton: signed sessions, typed deal state transitions, workspace messaging, AI onboarding summaries, a richer Prisma schema, and API endpoints for health, current user, and deals.
 
----
+## Current architecture
 
-## 🚀 Key Architectural Features
-1. **Next.js 15 App Router** (Zero cost hosted on Vercel)
-2. **Supabase Serverless Backend** (Free-tier Postgres Database, Secure JWT Auth, S3 Storage, and Realtime WebSockets)
-3. **Stripe Connect Escrow System** (Webhook triggers with automated ledger splits)
-4. **Cinematic Dark Design System** (Tailwind CSS v4 + Framer Motion + custom glassmorphic aesthetics)
-5. **AI Alignment Assistant** (Requirement summaries & scope extraction via Gemini/OpenAI integration)
+- `Next.js 16 App Router` frontend and BFF layer
+- `TypeScript` across UI, actions, and platform domain services
+- `Tailwind CSS v4` and `Framer Motion` for the premium dashboard/workspace shell
+- `Prisma + PostgreSQL` schema for the long-term data model
+- `Local signed-session mode` for development without external auth
+- `Mock-backed platform service` so the app works immediately without a live database
 
----
+## What was built in this pass
 
-## 🛠️ Getting Started
+- Signed cookie sessions using HMAC in [src/lib/session.ts](/d:/telecode2/src/lib/session.ts)
+- Password hashing with `scrypt` in [src/lib/security.ts](/d:/telecode2/src/lib/security.ts)
+- Shared platform domain types in [src/lib/platform/types.ts](/d:/telecode2/src/lib/platform/types.ts)
+- Mock runtime datastore and business service layer in [src/lib/platform/mock-data.ts](/d:/telecode2/src/lib/platform/mock-data.ts) and [src/lib/platform/service.ts](/d:/telecode2/src/lib/platform/service.ts)
+- Refactored server actions for auth, deals, chat, profiles, and posts
+- Rebuilt dashboard, workspace, and feed screens around typed platform data
+- Expanded Prisma schema for sessions, payout rules, call sessions, notifications, and dispute lifecycle
+- Route handlers:
+  - `GET /api/health`
+  - `GET /api/me`
+  - `GET /api/deals`
 
-### 1. Environment Variable Setup
-Duplicate `.env.example` to `.env` and insert your credentials:
-```bash
-cp .env.example .env
-```
+## Local setup
 
-### 2. Local Installation
-Install dependencies:
-```bash
-npm install
-```
+1. Copy `.env.example` to `.env`.
+2. Set at minimum `SESSION_SECRET`.
+3. Install dependencies with `npm install`.
+4. Start the app with `npm run dev`.
 
-### 3. Database Syncing (Prisma)
-Prisma is configured out of the box using `prisma.config.ts`. To apply the database schema onto your Supabase PostgreSQL instance:
-```bash
-npx prisma db push
-```
+The current default mode is local signed-session mode. You can log in with the seeded mock identities:
 
-### 4. Running the Project
-Launch the development server:
-```bash
-npm run dev
-```
-Open [http://localhost:3000](http://localhost:3000) to view the platform.
+- Hunter: `marcus@telecode.io` / `Telecode123!`
+- Developer: `elena@telecode.io` / `Telecode123!`
+- Client: `robert@ironpulse.com` / `Telecode123!`
 
----
+## Database notes
 
-## 📂 Project Structure
-*   `src/app/page.tsx` — Cinematic Awwwards-inspired landing page with smooth physics animations.
-*   `src/app/dashboard/page.tsx` — Role-based switcher swappable deck (Hunter, Developer, Client, Admin).
-*   `src/app/workspace/[dealId]/page.tsx` — Slack-style chats, Notion milestone boards, S3 file managers, and AI brief summaries.
-*   `src/store/useStore.ts` — Zustand reactive store handling multi-role flows, states, and action triggers.
-*   `prisma/schema.prisma` — Complete DB relational database modeling.
+The Prisma schema has been upgraded, but the repo is still safe to run without a migrated database because the application falls back to the in-memory platform store.
+
+When you are ready to move from mock mode to a real database:
+
+1. Set `DATABASE_URL` and `DIRECT_URL`.
+2. Run `npx prisma generate`.
+3. Run `npx prisma db push` or your preferred migration flow.
+4. Replace mock service paths with Prisma-backed implementations incrementally.
+
+## Suggested next steps
+
+1. Add a proper auth provider for Google OAuth and password recovery.
+2. Move the mock-backed platform service to real Prisma repositories.
+3. Add Stripe Connect payment intents, webhooks, and payout orchestration.
+4. Introduce Socket.io and WebRTC services for realtime collaboration and calls.
+5. Add admin dispute and analytics surfaces.
