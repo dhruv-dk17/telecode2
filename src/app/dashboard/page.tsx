@@ -520,7 +520,7 @@ export default function DashboardPage() {
                     <AppSurface accent="amber" className="rounded-[2rem] p-6 text-center">
                       <div className="text-lg font-semibold text-white">No active workspaces</div>
                       <p className="mt-2 text-sm leading-7 text-slate-400">
-                        Hunters can click "Create new deal" or "Browse Developers" to select a coder and initiate a project.
+                        Hunters can click &quot;Create new deal&quot; or &quot;Browse Developers&quot; to select a coder and initiate a project.
                       </p>
                     </AppSurface>
                   )}
@@ -613,8 +613,8 @@ export default function DashboardPage() {
 
                           {hunterInvite?.explanation && (
                             <div className="mb-6 rounded-xl border border-white/5 bg-white/5 p-4 text-xs">
-                              <div className="text-[0.65rem] uppercase tracking-widest text-slate-400 font-bold mb-1">Hunter's Message:</div>
-                              <p className="text-slate-200 leading-6 italic">"{hunterInvite.explanation}"</p>
+                              <div className="text-[0.65rem] uppercase tracking-widest text-slate-400 font-bold mb-1">Hunter message</div>
+                              <p className="text-slate-200 leading-6 italic">&ldquo;{hunterInvite.explanation}&rdquo;</p>
                             </div>
                           )}
 

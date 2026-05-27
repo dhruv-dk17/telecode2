@@ -31,6 +31,19 @@ import { getPostsAction } from "@/app/actions/posts";
 import { useStore } from "@/store/useStore";
 import type { PlatformProfile, PlatformPost, PlatformDeal } from "@/lib/platform/types";
 
+type ExperienceItem = {
+  title: string;
+  company: string;
+  duration: string;
+  desc?: string;
+};
+
+type EducationItem = {
+  school: string;
+  degree: string;
+  year: string;
+};
+
 export default function ProfilePage({ params }: { params: Promise<{ userId: string }> }) {
   const { userId } = use(params);
   const router = useRouter();
@@ -231,7 +244,7 @@ export default function ProfilePage({ params }: { params: Promise<{ userId: stri
                       </div>
                       
                       <div className="space-y-6 relative border-l border-white/5 pl-4 ml-3.5">
-                        {(profile.devProfile.experience as any[]).map((exp, idx) => (
+                        {(profile.devProfile.experience as ExperienceItem[]).map((exp, idx) => (
                           <div key={idx} className="relative">
                             <div className="absolute -left-[25px] top-1 h-3 w-3 rounded-full border-2 border-violet-400 bg-[#07111f]" />
                             <div className="text-xs text-violet-300 tracking-wider font-semibold">{exp.duration}</div>
@@ -277,7 +290,7 @@ export default function ProfilePage({ params }: { params: Promise<{ userId: stri
                         <h2 className="text-lg font-bold text-white">Academic Ledger</h2>
                       </div>
                       <div className="space-y-4">
-                        {(profile.devProfile.education as any[]).map((edu, idx) => (
+                        {(profile.devProfile.education as EducationItem[]).map((edu, idx) => (
                           <div key={idx} className="border-b border-white/5 pb-3 last:border-b-0 last:pb-0">
                             <div className="flex justify-between items-start gap-4">
                               <div>

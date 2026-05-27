@@ -67,6 +67,9 @@ export function Navbar() {
           <Link href="/feed" className="nav-link">
             Network Feed
           </Link>
+          <Link href="/inbox" className="nav-link">
+            Inbox
+          </Link>
         </nav>
 
         <div className="flex items-center gap-3">

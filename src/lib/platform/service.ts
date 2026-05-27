@@ -3,6 +3,7 @@ import { createResetToken, hashPassword, hashToken, verifyPassword } from "@/lib
 import { getMockStore } from "@/lib/platform/mock-data";
 import type {
   DealState,
+  InviteRole,
   PlatformAiSummary,
   PlatformDeal,
   PlatformDirectMessage,
@@ -11,9 +12,18 @@ import type {
   PlatformProfile,
   Role,
   SessionUser,
-  InviteRole,
 } from "@/lib/platform/types";
-import { normalizeEmail, validateEmail, validateName, validatePassword } from "@/lib/validation";
+import {
+  normalizeEmail,
+  validateEmail,
+  validateMoney,
+  validateName,
+  validatePassword,
+  validatePercentage,
+  validateRequiredText,
+  validateTimelineWeeks,
+  validateUpiId,
+} from "@/lib/validation";
 
 const transitions: Partial<Record<DealState, DealState[]>> = {
   CREATED: ["INVITED", "PENDING_PAYMENT", "CANCELLED"],
@@ -49,6 +59,62 @@ function stripPassword<T extends { passwordHash?: string }>(value: T) {
   return rest;
 }
 
+function buildSystemMessage(dealId: string, content: string) {
+  return {
+    id: `message-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    dealId,
+    userId: "system",
+    content,
+    createdAt: new Date().toISOString(),
+    user: { name: "Telecode System", role: "ADMIN" as Role },
+  };
+}
+
+function isPendingInviteForUser(user: SessionUser, invite: PlatformInvite) {
+  return (
+    invite.status === "PENDING" &&
+    invite.recipientEmail === user.email &&
+    invite.recipientRole === user.role
+  );
+}
+
+function canAccessDeal(
+  user: SessionUser,
+  deal: PlatformDeal,
+  invites: PlatformInvite[],
+) {
+  if (user.role === "ADMIN") {
+    return true;
+  }
+
+  if (deal.hunterId === user.id || deal.developerId === user.id || deal.clientId === user.id) {
+    return true;
+  }
+
+  return invites.some((invite) => invite.dealId === deal.id && isPendingInviteForUser(user, invite));
+}
+
+function assertDealAccess(
+  user: SessionUser,
+  deal: PlatformDeal,
+  invites: PlatformInvite[],
+  allowedRoles?: Role[],
+) {
+  if (!canAccessDeal(user, deal, invites)) {
+    throw new Error("You do not have access to this workspace.");
+  }
+
+  if (allowedRoles && !allowedRoles.includes(user.role)) {
+    throw new Error("You are not allowed to perform this action.");
+  }
+}
+
+function assertSelfServiceRole(role: Role) {
+  if (!["CLIENT", "DEVELOPER", "HUNTER"].includes(role)) {
+    throw new Error("This role cannot be created through self-service signup.");
+  }
+}
+
 export async function isDatabaseReady() {
   const dbUrl = process.env.DATABASE_URL;
   if (!dbUrl || dbUrl.includes("[password]") || dbUrl.includes("mock")) {
@@ -69,6 +135,8 @@ export async function createUser(input: {
   role: Role;
   password: string;
 }) {
+  assertSelfServiceRole(input.role);
+
   const email = validateEmail(input.email);
   const name = validateName(input.name);
   const password = validatePassword(input.password);
@@ -89,11 +157,13 @@ export async function createUser(input: {
   if (input.role === "DEVELOPER") {
     user.devProfile = {
       headline: "Product-focused developer",
+      bio: "Builds clean, trustworthy product experiences and can join funded delivery immediately.",
       skills: ["Next.js", "TypeScript"],
       stack: ["Next.js", "Prisma"],
       availability: true,
       isVerified: false,
       ratingAvg: 0,
+      completedProjects: 0,
     };
   }
 
@@ -108,7 +178,7 @@ export async function createUser(input: {
 
   if (input.role === "CLIENT") {
     user.clientProfile = {
-      companyName: `${input.name.trim()} Studio`,
+      companyName: `${name} Studio`,
       headline: `${name} team`,
       teamSize: 3,
       fundingStage: "Bootstrapped",
@@ -194,25 +264,14 @@ export async function resetPassword(input: {
 
 export async function getDealsForUser(user: SessionUser) {
   const store = getMockStore();
-  let deals = store.deals;
-
-  if (user.role === "HUNTER") {
-    deals = deals.filter((deal) => deal.hunterId === user.id);
-  }
-
-  if (user.role === "DEVELOPER") {
-    deals = deals.filter((deal) => deal.developerId === user.id || !deal.developerId);
-  }
-
-  if (user.role === "CLIENT") {
-    deals = deals.filter((deal) => deal.clientId === user.id || deal.state === "INVITED");
-  }
 
   return clone(
-    deals.map((deal) => ({
-      ...deal,
-      invites: store.invites.filter((invite) => invite.dealId === deal.id),
-    })),
+    store.deals
+      .filter((deal) => canAccessDeal(user, deal, store.invites))
+      .map((deal) => ({
+        ...deal,
+        invites: store.invites.filter((invite) => invite.dealId === deal.id),
+      })),
   );
 }
 
@@ -236,23 +295,33 @@ export async function createDealForHunter(
     throw new Error("Only hunters can create new deals.");
   }
 
-  const platformSplit = 100 - input.developerSplit - input.hunterSplit;
-  if (platformSplit < 0) {
-    throw new Error("Revenue split exceeds 100%.");
+  const title = validateRequiredText(input.title, "Project title", 4, 120);
+  const description = validateRequiredText(input.description, "Deal summary", 20, 4000);
+  const budget = validateMoney(input.budget, "Budget", 500);
+  const timelineWeeks = validateTimelineWeeks(input.timelineWeeks);
+  const developerSplit = validatePercentage(input.developerSplit, "Developer split");
+  const hunterSplit = validatePercentage(input.hunterSplit, "Hunter split");
+  const platformSplit = 100 - developerSplit - hunterSplit;
+
+  if (platformSplit !== 10) {
+    throw new Error("Telecode requires a 10% platform fee. Use a valid 60/30/10-style split.");
   }
 
   const store = getMockStore();
   const dealId = `deal-${Date.now()}`;
+  const discoveryAmount = Math.round(budget * 0.3);
+  const deliveryAmount = budget - discoveryAmount;
+
   const deal: PlatformDeal = {
     id: dealId,
-    title: input.title.trim(),
-    description: input.description.trim(),
-    budget: input.budget,
+    title,
+    description,
+    budget,
     state: "CREATED",
-    developerSplit: input.developerSplit,
-    hunterSplit: input.hunterSplit,
+    developerSplit,
+    hunterSplit,
     platformSplit,
-    timelineWeeks: input.timelineWeeks,
+    timelineWeeks,
     createdAt: new Date().toISOString(),
     hunterId: user.id,
     inviteLink: `invite-${Date.now()}`,
@@ -260,7 +329,7 @@ export async function createDealForHunter(
       {
         id: `${dealId}-milestone-1`,
         title: "Discovery and scope lock",
-        amount: Math.round(input.budget * 0.3),
+        amount: discoveryAmount,
         dueDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
         deliverables: ["Requirements brief", "Milestone breakdown", "Call summary"],
         status: "PENDING",
@@ -270,10 +339,8 @@ export async function createDealForHunter(
       {
         id: `${dealId}-milestone-2`,
         title: "Build and launch",
-        amount: input.budget - Math.round(input.budget * 0.3),
-        dueDate: new Date(
-          Date.now() + input.timelineWeeks * 7 * 24 * 60 * 60 * 1000,
-        ).toISOString(),
+        amount: deliveryAmount,
+        dueDate: new Date(Date.now() + timelineWeeks * 7 * 24 * 60 * 60 * 1000).toISOString(),
         deliverables: ["Production application", "Documentation", "Launch support"],
         status: "PENDING",
         revisionCount: 0,
@@ -285,13 +352,16 @@ export async function createDealForHunter(
         id: `${dealId}-message-1`,
         dealId,
         userId: user.id,
-        content: "Deal created. Client invite and split lock are ready for funding.",
+        content: "Deal created. Next step: choose a developer and send a proposal with clear project context.",
         createdAt: new Date().toISOString(),
         user: { name: user.name, role: user.role },
       },
     ],
     invites: [],
     aiSummary: null,
+    developerMarkedDone: false,
+    clientApprovedDone: false,
+    hunterApprovedDone: false,
   };
 
   store.deals.unshift(deal);
@@ -311,7 +381,7 @@ export async function createInviteForDeal(
   }
 
   const store = getMockStore();
-  const recipientEmail = normalizeEmail(input.recipientEmail);
+  const recipientEmail = validateEmail(input.recipientEmail);
   const deal = store.deals.find((item) => item.id === input.dealId);
   if (!deal) {
     throw new Error("Deal not found.");
@@ -319,12 +389,15 @@ export async function createInviteForDeal(
   if (deal.hunterId !== user.id) {
     throw new Error("You can only invite users into your own deals.");
   }
+  if (input.recipientRole === "CLIENT" && !deal.developerId) {
+    throw new Error("A developer must accept the work before you invite the client.");
+  }
 
   const invitedUser = store.users.find(
     (candidate) => candidate.email === recipientEmail && candidate.role === input.recipientRole,
   );
-  if (!invitedUser) {
-    throw new Error(`No ${input.recipientRole.toLowerCase()} account exists for that email yet.`);
+  if (!invitedUser && input.recipientRole === "DEVELOPER") {
+    throw new Error("No developer account exists for that email yet.");
   }
 
   const existingInvite = store.invites.find(
@@ -346,7 +419,7 @@ export async function createInviteForDeal(
     recipientEmail,
     recipientRole: input.recipientRole,
     invitedByUserId: user.id,
-    invitedUserId: invitedUser.id,
+    invitedUserId: invitedUser?.id,
     status: "PENDING",
     createdAt: new Date().toISOString(),
   };
@@ -362,21 +435,22 @@ export async function createInviteForDeal(
     user: { name: user.name, role: user.role },
   });
 
-  const dm: PlatformDirectMessage = {
-    id: `dm-${Date.now()}`,
-    toUserId: invitedUser.id,
-    fromUserId: user.id,
-    title: `${input.recipientRole === "DEVELOPER" ? "Developer" : "Client"} invitation`,
-    body: `${user.name} invited you to join "${deal.title}" on Telecode.`,
-    ctaUrl: `/invite/${token}`,
-    relatedInviteId: invite.id,
-    createdAt: new Date().toISOString(),
-  };
-  store.directMessages.unshift(dm);
+  if (invitedUser) {
+    const dm: PlatformDirectMessage = {
+      id: `dm-${Date.now()}`,
+      toUserId: invitedUser.id,
+      fromUserId: user.id,
+      title: `${input.recipientRole === "DEVELOPER" ? "Developer" : "Client"} invitation`,
+      body: `${user.name} invited you to join "${deal.title}" on Telecode.`,
+      ctaUrl: `/invite/${token}`,
+      relatedInviteId: invite.id,
+      createdAt: new Date().toISOString(),
+    };
+    store.directMessages.unshift(dm);
+  }
 
   return clone({
     invite,
-    dm,
     acceptUrl: `/invite/${token}`,
   });
 }
@@ -410,14 +484,17 @@ export async function acceptInviteByToken(user: SessionUser, token: string) {
 
   if (invite.recipientRole === "DEVELOPER") {
     deal.developerId = user.id;
+    if (deal.state === "CREATED") {
+      deal.state = "INVITED";
+    }
   } else {
     deal.clientId = user.id;
+    if (deal.state === "INVITED") {
+      deal.state = "PENDING_PAYMENT";
+    }
   }
 
-  if (deal.state === "CREATED") {
-    deal.state = "INVITED";
-  }
-
+  invite.invitedUserId = user.id;
   invite.status = "ACCEPTED";
   invite.acceptedAt = new Date().toISOString();
   deal.invites = store.invites.filter((item) => item.dealId === deal.id);
@@ -430,7 +507,9 @@ export async function acceptInviteByToken(user: SessionUser, token: string) {
     user: { name: user.name, role: user.role },
   });
 
-  const relatedDm = store.directMessages.find((item) => item.relatedInviteId === invite.id && !item.readAt);
+  const relatedDm = store.directMessages.find(
+    (item) => item.relatedInviteId === invite.id && item.toUserId === user.id,
+  );
   if (relatedDm) {
     relatedDm.readAt = new Date().toISOString();
   }
@@ -464,31 +543,34 @@ export async function transitionDealState(user: SessionUser, dealId: string, nex
   if (!deal) {
     throw new Error("Deal not found.");
   }
+  assertDealAccess(user, deal, store.invites);
 
   if (!(transitions[deal.state] || []).includes(nextState)) {
     throw new Error(`Invalid transition from ${deal.state} to ${nextState}.`);
   }
 
-  if (nextState === "PENDING_PAYMENT" && user.role !== "HUNTER") {
-    throw new Error("Only hunters can send the client invite.");
+  if (nextState === "PENDING_PAYMENT") {
+    if (user.role !== "HUNTER" || deal.hunterId !== user.id) {
+      throw new Error("Only the assigned hunter can send the client invite.");
+    }
+    if (!deal.developerId) {
+      throw new Error("A developer must accept before requesting payment.");
+    }
   }
 
-  if (nextState === "FUNDED" && user.role !== "CLIENT") {
-    throw new Error("Only the client can fund escrow.");
+  if (nextState === "FUNDED") {
+    if (user.role !== "CLIENT" || deal.clientId !== user.id) {
+      throw new Error("Only the invited client can fund escrow.");
+    }
   }
 
-  if (nextState === "IN_PROGRESS" && user.role !== "DEVELOPER") {
-    throw new Error("Only the developer can start delivery.");
+  if (nextState === "IN_PROGRESS") {
+    if (user.role !== "DEVELOPER" || deal.developerId !== user.id) {
+      throw new Error("Only the assigned developer can start delivery.");
+    }
   }
 
   deal.state = nextState;
-  if (user.role === "CLIENT" && !deal.clientId) {
-    deal.clientId = user.id;
-  }
-  if (user.role === "DEVELOPER" && !deal.developerId) {
-    deal.developerId = user.id;
-  }
-
   deal.messages.push({
     id: `message-${Date.now()}`,
     dealId,
@@ -507,12 +589,13 @@ export async function submitMessage(user: SessionUser, dealId: string, content: 
   if (!deal) {
     throw new Error("Deal not found.");
   }
+  assertDealAccess(user, deal, store.invites);
 
   const message = {
     id: `message-${Date.now()}`,
     dealId,
     userId: user.id,
-    content: content.trim(),
+    content: validateRequiredText(content, "Message", 1, 2000),
     createdAt: new Date().toISOString(),
     user: { name: user.name, role: user.role },
   };
@@ -527,8 +610,13 @@ export async function saveAiSummary(user: SessionUser, dealId: string, summary: 
   if (!deal) {
     throw new Error("Deal not found.");
   }
+  assertDealAccess(user, deal, store.invites);
 
-  deal.aiSummary = summary;
+  deal.aiSummary = {
+    summary: validateRequiredText(summary.summary, "AI summary", 20, 3000),
+    deliverables: summary.deliverables.map((item) => validateRequiredText(item, "Deliverable", 2, 200)),
+    revisionRules: summary.revisionRules.map((item) => validateRequiredText(item, "Revision rule", 2, 200)),
+  };
   deal.messages.push({
     id: `message-${Date.now()}`,
     dealId,
@@ -552,29 +640,31 @@ export async function updateMilestoneStatus(
   if (!deal || !milestone) {
     throw new Error("Milestone not found.");
   }
-
-  if (action === "submit" && user.role !== "DEVELOPER") {
-    throw new Error("Only the developer can submit milestones.");
-  }
-
-  if ((action === "approve" || action === "revision") && user.role !== "CLIENT") {
-    throw new Error("Only the client can review milestones.");
-  }
+  assertDealAccess(user, deal, store.invites);
 
   if (action === "submit") {
+    if (user.role !== "DEVELOPER" || deal.developerId !== user.id) {
+      throw new Error("Only the assigned developer can submit milestones.");
+    }
     milestone.status = "SUBMITTED";
     deal.state = "MILESTONE_REVIEW";
   }
 
   if (action === "approve") {
+    if (user.role !== "CLIENT" || deal.clientId !== user.id) {
+      throw new Error("Only the assigned client can approve milestones.");
+    }
     milestone.status = "APPROVED";
     deal.state =
       deal.milestones.every((item) => item.id === milestoneId || item.status === "APPROVED")
-        ? "COMPLETED"
+        ? "PARTIALLY_RELEASED"
         : "PARTIALLY_RELEASED";
   }
 
   if (action === "revision") {
+    if (user.role !== "CLIENT" || deal.clientId !== user.id) {
+      throw new Error("Only the assigned client can request revisions.");
+    }
     milestone.status = "REVISION_REQUESTED";
     milestone.revisionCount += 1;
     deal.state = "IN_PROGRESS";
@@ -632,8 +722,8 @@ export async function createPost(user: SessionUser, content: string, imageUrl?: 
 
   const post: PlatformPost = {
     id: `post-${Date.now()}`,
-    content: content.trim(),
-    imageUrl,
+    content: validateRequiredText(content, "Post", 8, 4000),
+    imageUrl: imageUrl?.trim() || undefined,
     likesCount: 0,
     createdAt: new Date().toISOString(),
     author: stripPassword(author),
@@ -656,11 +746,7 @@ export async function likePost(postId: string) {
 
 export async function getDevelopers() {
   const store = getMockStore();
-  return clone(
-    store.users
-      .filter((user) => user.role === "DEVELOPER")
-      .map(stripPassword)
-  );
+  return clone(store.users.filter((user) => user.role === "DEVELOPER").map(stripPassword));
 }
 
 export async function proposeDealToDeveloper(
@@ -679,8 +765,17 @@ export async function proposeDealToDeveloper(
   if (!deal || !developer) {
     throw new Error("Deal or developer not found.");
   }
+  if (deal.hunterId !== user.id) {
+    throw new Error("You can only propose developers on your own deals.");
+  }
+  if (deal.state !== "CREATED") {
+    throw new Error("Developer proposals can only be sent while the deal is still open.");
+  }
+  if (deal.developerId) {
+    throw new Error("A developer has already been selected for this deal.");
+  }
 
-  // Check for any existing pending proposal
+  const proposalMessage = validateRequiredText(message, "Proposal message", 10, 1200);
   const existingInvite = store.invites.find(
     (invite) =>
       invite.dealId === dealId &&
@@ -701,18 +796,17 @@ export async function proposeDealToDeveloper(
     invitedByUserId: user.id,
     invitedUserId: developerId,
     status: "PENDING",
-    explanation: message.trim(),
+    explanation: proposalMessage,
     createdAt: new Date().toISOString(),
   };
 
   store.invites.unshift(invite);
   deal.invites = store.invites.filter((item) => item.dealId === deal.id);
-  
   deal.messages.push({
     id: `message-${Date.now()}`,
     dealId,
     userId: user.id,
-    content: `Proposed deal to Developer ${developer.name} with message: "${message.trim()}"`,
+    content: `Proposal sent to ${developer.name}. Waiting for developer response.`,
     createdAt: new Date().toISOString(),
     user: { name: user.name, role: user.role },
   });
@@ -722,8 +816,8 @@ export async function proposeDealToDeveloper(
     toUserId: developerId,
     fromUserId: user.id,
     title: "New Work Proposal",
-    body: `${user.name} proposed you the deal "${deal.title}" with split ${deal.developerSplit}%.`,
-    ctaUrl: `/workspace/${dealId}`,
+    body: `${user.name} proposed "${deal.title}" with a ${deal.developerSplit}% developer split.`,
+    ctaUrl: "/dashboard",
     relatedInviteId: invite.id,
     createdAt: new Date().toISOString(),
   };
@@ -749,44 +843,48 @@ export async function respondToDealProposal(
   }
 
   const invite = store.invites.find(
-    (item) => item.dealId === dealId && item.invitedUserId === user.id && item.status === "PENDING"
+    (item) => item.dealId === dealId && item.invitedUserId === user.id && item.status === "PENDING",
   );
   if (!invite) {
     throw new Error("No pending proposal found for this deal.");
   }
 
+  const normalizedExplanation = validateRequiredText(
+    explanation,
+    accept ? "Acceptance message" : "Rejection reason",
+    5,
+    1200,
+  );
+
   if (accept) {
     invite.status = "ACCEPTED";
     invite.acceptedAt = new Date().toISOString();
-    invite.explanation = explanation.trim();
-    
+    invite.explanation = normalizedExplanation;
+
     deal.developerId = user.id;
-    deal.developerAcceptanceMessage = explanation.trim();
-    deal.state = "INVITED"; // Progress deal state
-    
+    deal.developerAcceptanceMessage = normalizedExplanation;
+    deal.state = "INVITED";
     deal.messages.push({
       id: `message-${Date.now()}`,
       dealId,
       userId: user.id,
-      content: `Accepted proposal with explanation: "${explanation.trim()}"`,
+      content: `${user.name} accepted the proposal and is ready for client onboarding.`,
       createdAt: new Date().toISOString(),
       user: { name: user.name, role: user.role },
     });
   } else {
     invite.status = "REJECTED";
-    invite.explanation = explanation.trim();
-    
+    invite.explanation = normalizedExplanation;
     deal.messages.push({
       id: `message-${Date.now()}`,
       dealId,
       userId: user.id,
-      content: `Rejected proposal with explanation: "${explanation.trim()}"`,
+      content: `${user.name} declined the proposal and shared a reason with the hunter.`,
       createdAt: new Date().toISOString(),
       user: { name: user.name, role: user.role },
     });
   }
 
-  // Mark related DM as read
   const dm = store.directMessages.find((item) => item.relatedInviteId === invite.id);
   if (dm) {
     dm.readAt = new Date().toISOString();
@@ -811,11 +909,19 @@ export async function updateClientRequirementsAndPayUPI(
   if (!deal) {
     throw new Error("Deal not found.");
   }
+  assertDealAccess(user, deal, store.invites, ["CLIENT"]);
+
+  if (deal.clientId && deal.clientId !== user.id) {
+    throw new Error("Only the invited client can fund this workspace.");
+  }
+  if (!deal.developerId) {
+    throw new Error("A developer must be selected before the client can pay.");
+  }
 
   deal.clientId = user.id;
-  deal.clientRequirements = requirements.trim();
+  deal.clientRequirements = validateRequiredText(requirements, "Project brief", 30, 5000);
   deal.upiPaymentDetails = {
-    upiId: upiId.trim(),
+    upiId: validateUpiId(upiId),
     transactionId: `UPI-TXN-${Date.now()}`,
     paidAt: new Date().toISOString(),
   };
@@ -825,7 +931,7 @@ export async function updateClientRequirementsAndPayUPI(
     id: `message-${Date.now()}`,
     dealId,
     userId: user.id,
-    content: `Escrow funded successfully via UPI ID: ${upiId.trim()}. Project Brief locked: "${requirements.trim()}". Workspace Chat unlocked for Client, Coder, and Hunter.`,
+    content: "Escrow funded successfully. The project brief is now locked and the shared workspace is active.",
     createdAt: new Date().toISOString(),
     user: { name: user.name, role: user.role },
   });
@@ -843,15 +949,25 @@ export async function submitFinalDelivery(user: SessionUser, dealId: string) {
   if (!deal) {
     throw new Error("Deal not found.");
   }
+  assertDealAccess(user, deal, store.invites, ["DEVELOPER"]);
+
+  if (deal.developerId !== user.id) {
+    throw new Error("Only the assigned developer can submit final delivery.");
+  }
+  if (!["FUNDED", "ONBOARDING", "IN_PROGRESS", "PARTIALLY_RELEASED"].includes(deal.state)) {
+    throw new Error("This workspace is not ready for final delivery.");
+  }
 
   deal.developerMarkedDone = true;
+  deal.clientApprovedDone = false;
+  deal.hunterApprovedDone = false;
   deal.state = "MILESTONE_REVIEW";
 
   deal.messages.push({
     id: `message-${Date.now()}`,
     dealId,
     userId: user.id,
-    content: "Developer Elena Rostova marked the project as DELIVERED & DONE. Hunter and Client approvals are required to release escrow.",
+    content: `${user.name} marked the project as delivered. Client and hunter approvals are now required before release.`,
     createdAt: new Date().toISOString(),
     user: { name: user.name, role: user.role },
   });
@@ -861,7 +977,7 @@ export async function submitFinalDelivery(user: SessionUser, dealId: string) {
 
 export async function approveFinalDelivery(user: SessionUser, dealId: string) {
   if (user.role !== "CLIENT" && user.role !== "HUNTER") {
-    throw new Error("Only Client or Hunter can sign off on final delivery.");
+    throw new Error("Only client or hunter can sign off on final delivery.");
   }
 
   const store = getMockStore();
@@ -869,10 +985,27 @@ export async function approveFinalDelivery(user: SessionUser, dealId: string) {
   if (!deal) {
     throw new Error("Deal not found.");
   }
+  assertDealAccess(user, deal, store.invites, ["CLIENT", "HUNTER"]);
+
+  if (!deal.developerMarkedDone) {
+    throw new Error("The developer must mark delivery complete before sign-off.");
+  }
 
   if (user.role === "CLIENT") {
+    if (deal.clientId !== user.id) {
+      throw new Error("Only the assigned client can sign off.");
+    }
+    if (deal.clientApprovedDone) {
+      throw new Error("Client sign-off has already been recorded.");
+    }
     deal.clientApprovedDone = true;
-  } else if (user.role === "HUNTER") {
+  } else {
+    if (deal.hunterId !== user.id) {
+      throw new Error("Only the assigned hunter can sign off.");
+    }
+    if (deal.hunterApprovedDone) {
+      throw new Error("Hunter sign-off has already been recorded.");
+    }
     deal.hunterApprovedDone = true;
   }
 
@@ -880,7 +1013,7 @@ export async function approveFinalDelivery(user: SessionUser, dealId: string) {
     id: `message-${Date.now()}`,
     dealId,
     userId: user.id,
-    content: `${user.name} (${user.role === "CLIENT" ? "Client" : "Hunter"}) signed off and approved final delivery.`,
+    content: `${user.name} signed off on the final delivery.`,
     createdAt: new Date().toISOString(),
     user: { name: user.name, role: user.role },
   });
@@ -889,26 +1022,25 @@ export async function approveFinalDelivery(user: SessionUser, dealId: string) {
     deal.state = "COMPLETED";
     deal.completedAt = new Date().toISOString();
 
-    // release payout to developer and update stats
     const developer = store.users.find((item) => item.id === deal.developerId);
-    if (developer && developer.devProfile) {
-      developer.devProfile.earningsTotal = (developer.devProfile.earningsTotal || 0) + (deal.budget * (deal.developerSplit / 100));
-      developer.devProfile.completedProjects = (developer.devProfile.completedProjects || 0) + 1;
+    if (developer?.devProfile) {
+      developer.devProfile.earningsTotal =
+        (developer.devProfile.earningsTotal || 0) + deal.budget * (deal.developerSplit / 100);
+      developer.devProfile.completedProjects =
+        (developer.devProfile.completedProjects || 0) + 1;
     }
 
-    // update hunter stats
     const hunter = store.users.find((item) => item.id === deal.hunterId);
-    if (hunter && hunter.hunterProfile) {
+    if (hunter?.hunterProfile) {
       hunter.hunterProfile.closedDealsCount = (hunter.hunterProfile.closedDealsCount || 0) + 1;
     }
 
-    deal.messages.push({
-      id: `message-${Date.now()}`,
-      dealId,
-      userId: "system",
-      content: `Ledger Released! Escrow splits completely distributed: 60% ($${deal.budget * 0.6}) to Developer, 30% ($${deal.budget * 0.3}) to Hunter, 10% ($${deal.budget * 0.1}) platform fee. Deal state COMPLETED.`,
-      createdAt: new Date().toISOString(),
-    });
+    deal.messages.push(
+      buildSystemMessage(
+        dealId,
+        `Escrow released: ${deal.developerSplit}% to developer, ${deal.hunterSplit}% to hunter, ${deal.platformSplit}% retained as platform fee.`,
+      ),
+    );
   }
 
   return clone(deal);

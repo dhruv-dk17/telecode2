@@ -31,10 +31,9 @@ import {
   submitUpiPaymentAction,
   markFinalDoneAction,
   signOffAction,
-  updateDealStateAction,
 } from "@/app/actions/deals";
-import { createInviteForDeal } from "@/lib/platform/service"; // Direct client invite action
 import { getMessagesAction, sendMessageAction } from "@/app/actions/chat";
+import { createInviteAction } from "@/app/actions/invitations";
 import { useStore } from "@/store/useStore";
 import type { DealState, PlatformDeal, PlatformMessage } from "@/lib/platform/types";
 
@@ -62,6 +61,7 @@ export default function WorkspacePage({ params }: { params: Promise<{ dealId: st
   const [clientEmail, setClientEmail] = useState("");
   const [sendingInvite, setSendingInvite] = useState(false);
   const [inviteFeedback, setInviteFeedback] = useState("");
+  const [inviteLink, setInviteLink] = useState("");
 
   // Final delivery sign-off response state
   const [submittingSignOff, setSubmittingSignOff] = useState(false);
@@ -115,25 +115,29 @@ export default function WorkspacePage({ params }: { params: Promise<{ dealId: st
     }
   }
 
-  // Hunter manual client invite submission (simulates instant client joined)
   async function handleInviteClient(e: React.FormEvent) {
     e.preventDefault();
     if (!clientEmail.trim() || !currentUser || !deal) return;
 
     setSendingInvite(true);
     setInviteFeedback("");
+    setInviteLink("");
 
     try {
-      // Simulate client accept & join for mock-based workspace flow
-      const response = await updateDealStateAction(dealId, "PENDING_PAYMENT");
+      const response = await createInviteAction({
+        dealId,
+        recipientEmail: clientEmail,
+        recipientRole: "CLIENT",
+      });
       if (response.success) {
-        setInviteFeedback("Client invited! Escrow state transitioned to PENDING_PAYMENT.");
+        setInviteFeedback("Client invited successfully. They must accept the invite before funding escrow.");
+        setInviteLink("acceptUrl" in response ? response.acceptUrl : "");
         setClientEmail("");
         await refresh();
       } else {
         setInviteFeedback(response.error || "Failed to invite client.");
       }
-    } catch (err) {
+    } catch {
       setInviteFeedback("Failed to invite client.");
     } finally {
       setSendingInvite(false);
@@ -328,11 +332,11 @@ export default function WorkspacePage({ params }: { params: Promise<{ dealId: st
                 <AppSurface accent="cyan" className="rounded-[2rem] p-6">
                   <h3 className="text-lg font-bold text-white flex items-center gap-2">
                     <CheckCircle className="h-5 w-5 text-cyan-300" />
-                    <span>Developer Elena Rostova Accepted Proposal!</span>
+                    <span>Developer accepted the proposal</span>
                   </h3>
                   {deal.developerAcceptanceMessage && (
                     <div className="mt-3 rounded-xl bg-cyan-400/5 border border-cyan-400/10 p-4 text-xs italic text-cyan-100">
-                      " {deal.developerAcceptanceMessage} "
+                      &ldquo;{deal.developerAcceptanceMessage}&rdquo;
                     </div>
                   )}
 
@@ -353,12 +357,19 @@ export default function WorkspacePage({ params }: { params: Promise<{ dealId: st
                         </button>
                       </form>
                       {inviteFeedback && (
-                        <p className="text-[0.7rem] mt-2 text-cyan-300">{inviteFeedback}</p>
+                        <div className="mt-2 space-y-2">
+                          <p className="text-[0.7rem] text-cyan-300">{inviteFeedback}</p>
+                          {inviteLink ? (
+                            <Link href={inviteLink} className="text-[0.7rem] text-amber-300 underline underline-offset-4">
+                              Open invite preview
+                            </Link>
+                          ) : null}
+                        </div>
                       )}
                     </div>
                   ) : (
                     <p className="text-xs text-slate-400 mt-5 leading-6 border-t border-white/5 pt-4">
-                      * Hunter (Marcus Vane) has been notified to send the onboarding invitation to Client Robert Kim.
+                      * Hunter Marcus Vane has been notified to send the onboarding invitation to client Robert Kim.
                     </p>
                   )}
                 </AppSurface>
@@ -440,7 +451,7 @@ export default function WorkspacePage({ params }: { params: Promise<{ dealId: st
                   {/* Scope outline visual */}
                   <div className="mb-6 border-b border-white/5 pb-4">
                     <div className="text-[0.65rem] uppercase tracking-[0.24em] text-slate-400 font-bold mb-2">Active Project Brief</div>
-                    <p className="text-xs text-slate-200 leading-6 italic">" {deal.clientRequirements || "Custom corporate website with high end transitions"} "</p>
+                    <p className="text-xs text-slate-200 leading-6 italic">&ldquo;{deal.clientRequirements || "Custom corporate website with high end transitions"}&rdquo;</p>
                   </div>
 
                   {/* Delivery Actions based on deal.state and user role */}
@@ -484,7 +495,7 @@ export default function WorkspacePage({ params }: { params: Promise<{ dealId: st
                           {deal.clientApprovedDone ? (
                             <p className="mt-2 text-[0.7rem] text-cyan-200">Robert Kim confirmed work completion.</p>
                           ) : (
-                            <p className="mt-2 text-[0.7rem]">Awaiting Client's tick sign-off.</p>
+                            <p className="mt-2 text-[0.7rem]">Awaiting client sign-off.</p>
                           )}
                         </div>
 
@@ -503,7 +514,7 @@ export default function WorkspacePage({ params }: { params: Promise<{ dealId: st
                           {deal.hunterApprovedDone ? (
                             <p className="mt-2 text-[0.7rem] text-cyan-200">Marcus Vane confirmed work completion.</p>
                           ) : (
-                            <p className="mt-2 text-[0.7rem]">Awaiting Hunter's tick sign-off.</p>
+                            <p className="mt-2 text-[0.7rem]">Awaiting hunter sign-off.</p>
                           )}
                         </div>
                       </div>
@@ -644,7 +655,7 @@ export default function WorkspacePage({ params }: { params: Promise<{ dealId: st
                         <span>Client Requirements</span>
                       </div>
                       <p className="leading-6 italic">
-                        {deal.clientRequirements ? `"${deal.clientRequirements}"` : "Awaiting client's detailed submission."}
+                        {deal.clientRequirements ? `“${deal.clientRequirements}”` : "Awaiting detailed client submission."}
                       </p>
                     </div>
 
@@ -654,7 +665,7 @@ export default function WorkspacePage({ params }: { params: Promise<{ dealId: st
                           <CheckCircle className="h-3.5 w-3.5 text-cyan-300" />
                           <span>Coder Offer Accept Message</span>
                         </div>
-                        <p className="leading-6 italic">"{deal.developerAcceptanceMessage}"</p>
+                        <p className="leading-6 italic">&ldquo;{deal.developerAcceptanceMessage}&rdquo;</p>
                       </div>
                     )}
 
